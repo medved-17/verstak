@@ -1,7 +1,7 @@
-/* Токены — перенесены из Макет_интерфейса.html без изменений */
+/* Токены — из Макет_интерфейса.html; акцент светлой темы смягчён по просьбе владельца (#2440B5 → #4262D6) */
 :root{
   --ground:#EDF0F4; --surface:#FFFFFF; --surface-2:#F5F7FA; --ink:#141A26; --ink-2:#394252; --muted:#657083;
-  --rule:#D4DAE3; --rule-2:#E4E8EE; --accent:#2440B5; --accent-soft:#E5EAF9;
+  --rule:#D4DAE3; --rule-2:#E4E8EE; --accent:#4262D6; --accent-soft:#E5EAF9;
   --ok:#1A6A4D; --ok-bg:#EBF5EF; --warm:#855100; --warm-bg:#FCF2DE; --plum:#5B3A8C; --plum-bg:#F0EAF8;
   --bad:#973040; --bad-bg:#FAF0F1;
   --f-display:"Literata","PT Serif",Georgia,serif;

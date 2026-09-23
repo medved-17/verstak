@@ -48,7 +48,7 @@ export interface Member {
 // Колонки по умолчанию — из макета. Ключ «done» означает «Готово» для отметки выполнения.
 export const DEFAULT_STATUSES: Status[] = [
   { key: 'backlog', name: 'Очередь', color: '#8794A8' },
-  { key: 'now', name: 'В работе', color: '#2440B5' },
+  { key: 'now', name: 'В работе', color: '#4262D6' },
   { key: 'review', name: 'На проверке', color: '#855100' },
   { key: 'done', name: 'Готово', color: '#1A6A4D' },
 ];
@@ -98,7 +98,7 @@ export function toggleDone(id: string): Promise<void> {
 }
 
 // Цвета аватаров — из макета
-export const AVATAR_COLORS = ['#2440B5', '#1A6A4D', '#855100', '#5B3A8C', '#973040', '#657083'];
+export const AVATAR_COLORS = ['#4262D6', '#1A6A4D', '#855100', '#5B3A8C', '#973040', '#657083'];
 
 /** Сессия: держится в памяти после входа, роль не перечитывается перед каждым действием. */
 export interface Session {

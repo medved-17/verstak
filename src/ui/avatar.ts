@@ -1,12 +1,12 @@
 // Аватар участника — кружок с инициалами, как в макете
 import { initials } from '../auth';
 import { getMember } from '../store';
-import { esc } from './dom';
+import { color as fixColor, esc } from './dom';
 
 export function avatarHtml(uid: string): string {
   const m = getMember(uid);
   const name = m?.name ?? 'Неизвестный';
-  const color = m?.color ?? '#657083';
+  const color = fixColor(m?.color ?? '#657083');
   return `<span class="av-s" style="background:${esc(color)}" title="${esc(name)}">${esc(initials(name))}</span>`;
 }
 

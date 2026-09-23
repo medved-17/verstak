@@ -17,3 +17,10 @@ export function pl(n: number, one: string, few: string, many: string): string {
 export function addButton(): string {
   return can.editTasks() ? '<button class="btn pri" data-act="add">+ Задача</button>' : '';
 }
+
+// Прежний тёмный синий мог сохраниться в базе (цвет аватара, колонки «В работе») — рисуем новым
+const LEGACY_COLORS: Record<string, string> = { '#2440b5': '#4262D6' };
+
+export function color(hex: string): string {
+  return LEGACY_COLORS[hex.toLowerCase()] ?? hex;
+}

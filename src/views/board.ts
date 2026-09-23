@@ -1,6 +1,6 @@
 // Доска: колонки из статусов пространства, карточки по полю order
 import { getSession, getTasks, moveTask, type Task } from '../store';
-import { addButton, esc } from '../ui/dom';
+import { addButton, color, esc } from '../ui/dom';
 import { taskCardHtml } from '../ui/task-card';
 import { toast, writeErrorText } from '../ui/toast';
 import type { ViewResult } from './types';
@@ -21,7 +21,7 @@ export function viewBoard(): ViewResult {
     .map((c) => {
       const list = columnTasks(c.key);
       return `<div class="col" data-col="${esc(c.key)}">
-        <div class="ch"><span class="dot" style="background:${esc(c.color)}"></span>${esc(c.name)}<span class="n">${list.length}</span></div>
+        <div class="ch"><span class="dot" style="background:${esc(color(c.color))}"></span>${esc(c.name)}<span class="n">${list.length}</span></div>
         ${list.length ? list.map(taskCardHtml).join('') : '<div class="col-empty">Пусто</div>'}
       </div>`;
     })
