@@ -112,6 +112,12 @@ function renderShell(): void {
         <div class="nav" id="nav">
           ${NAV.map((n) => `<button data-v="${n.v}" aria-current="false"><span class="ic">${n.ic}</span>${n.label}<span class="cnt" id="c-${n.v}"></span></button>`).join('')}
         </div>
+        <div>
+          <div class="sgrp">Виды</div>
+          <div class="nav tree" id="tree">
+            <button data-list="all" aria-current="false"><span class="ic">▦</span>Все задачи<span class="cnt" id="c-all"></span></button>
+          </div>
+        </div>
         <div class="foot"><span id="me-av"></span><span class="nm">${esc(s.me.name)}</span><button class="btn" id="signout">Выйти</button></div>
       </aside>
       <div class="pane">
@@ -122,6 +128,10 @@ function renderShell(): void {
   app.querySelector('#nav')!.addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-v]');
     if (b) go('#/' + b.dataset.v);
+  });
+  app.querySelector('#tree')!.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-list]');
+    if (b) go('#/list/' + encodeURIComponent(b.dataset.list!));
   });
   app.querySelector('#signout')!.addEventListener('click', () => signOut());
 
@@ -149,6 +159,9 @@ function renderNav(route: Route): void {
   app.querySelectorAll<HTMLButtonElement>('#nav button').forEach((b) =>
     b.setAttribute('aria-current', String(b.dataset.v === route.name)),
   );
+  app.querySelectorAll<HTMLButtonElement>('#tree button').forEach((b) =>
+    b.setAttribute('aria-current', String(route.name === 'list' && b.dataset.list === route.arg)),
+  );
   const loaded = isLoaded();
   const set = (id: string, text: string) => {
     const el = app.querySelector('#' + id);
@@ -156,6 +169,7 @@ function renderNav(route: Route): void {
   };
   set('c-my', String(tasks.filter((t) => t.assignees.includes(s.uid) && !isDone(t)).length));
   set('c-board', String(tasks.length));
+  set('c-all', String(tasks.length));
   set('c-people', String(nMembers));
   set('ws-sub', pl(nMembers, 'участник', 'участника', 'участников'));
   app.querySelector('#me-av')!.innerHTML = avatarHtml(s.uid);
@@ -190,10 +204,25 @@ function renderPane(route: Route): void {
     body.innerHTML = '<div class="empty2">Загрузка задач…</div>';
     return;
   }
+  // Сохраняем фокус и курсор: данные могут прийти, пока человек печатает в поле поиска
+  const active = document.activeElement as HTMLInputElement | null;
+  const focusId = active && active.id && bar.parentElement!.contains(active) ? active.id : '';
+  const sel = focusId && 'selectionStart' in active! ? [active!.selectionStart, active!.selectionEnd] : null;
   const v = viewFor(route);
   bar.innerHTML = v.bar;
   body.innerHTML = v.body;
   v.mount?.(app.querySelector<HTMLElement>('.pane')!);
+  if (focusId) {
+    const el = document.getElementById(focusId) as HTMLInputElement | null;
+    el?.focus();
+    if (el && sel && sel[0] !== null) {
+      try {
+        el.setSelectionRange(sel[0], sel[1]);
+      } catch {
+        // у select и кнопок нет выделения
+      }
+    }
+  }
 }
 
 function render(): void {
