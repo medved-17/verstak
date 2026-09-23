@@ -181,17 +181,33 @@ function displayName(user: User): string {
  * Всё в одной транзакции: две вкладки при первом входе не создадут два пространства.
  * Повторный вход — одно чтение профиля и по одному чтению пространства и участника.
  */
+/** Ошибка открытия сессии с шагом, на котором она случилась, — для понятной диагностики. */
+export class SessionError extends Error {
+  constructor(public step: string, public code: string, cause: unknown) {
+    super(`${step}: ${code}`);
+    this.cause = cause;
+  }
+}
+
+async function step<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    throw new SessionError(name, (e as { code?: string }).code ?? String(e), e);
+  }
+}
+
 export async function openSession(user: User): Promise<Session> {
   const userRef = doc(db, 'users', user.uid);
   const name = displayName(user);
   const email = user.email ?? '';
 
   // Обычный путь: пространство уже есть. getDoc работает и из кэша, если нет связи.
-  const known = await getDoc(userRef);
+  const known = await step('чтение профиля users/' + user.uid, () => getDoc(userRef));
   countDoc(known, 'профиль');
   const knownWs: string[] = known.exists() ? (known.data().workspaces ?? []) : [];
 
-  const wsId = knownWs.length ? knownWs[0] : await runTransaction(db, async (tx) => {
+  const wsId = knownWs.length ? knownWs[0] : await step('создание пространства', () => runTransaction(db, async (tx) => {
     const snap = await tx.get(userRef);
     countReads(1, 'профиль (транзакция)');
     const existing: string[] = snap.exists() ? (snap.data().workspaces ?? []) : [];
@@ -214,12 +230,10 @@ export async function openSession(user: User): Promise<Session> {
     });
     tx.set(userRef, { name, email, workspaces: [wsRef.id] }, { merge: true });
     return wsRef.id;
-  });
+  }));
 
-  const [wsSnap, meSnap] = await Promise.all([
-    getDoc(doc(db, 'workspaces', wsId)),
-    getDoc(doc(db, 'workspaces', wsId, 'members', user.uid)),
-  ]);
+  const wsSnap = await step('чтение пространства ' + wsId, () => getDoc(doc(db, 'workspaces', wsId)));
+  const meSnap = await step('чтение участника', () => getDoc(doc(db, 'workspaces', wsId, 'members', user.uid)));
   countDoc(wsSnap, 'пространство');
   countDoc(meSnap, 'участник');
   if (!wsSnap.exists() || !meSnap.exists()) {

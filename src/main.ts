@@ -18,6 +18,7 @@ import {
   openSession,
   probeTasks,
   probeWrite,
+  SessionError,
   startDemo,
   startLive,
   stopLive,
@@ -434,12 +435,13 @@ async function onSignedIn(user: User): Promise<void> {
     await openSession(user);
   } catch (e) {
     console.error('Не удалось открыть пространство', e);
-    const code = (e as { code?: string }).code;
+    const code = e instanceof SessionError ? e.code : (e as { code?: string }).code;
+    const where = e instanceof SessionError ? ` Шаг: ${e.step}, код: ${e.code}.` : '';
     renderSessionError(
       user,
-      code === 'permission-denied'
+      (code === 'permission-denied'
         ? 'Нет доступа к данным: проверьте, что правила Firestore опубликованы.'
-        : 'Не удалось открыть пространство. Проверьте связь и обновите страницу.',
+        : 'Не удалось открыть пространство. Проверьте связь и обновите страницу.') + where,
     );
     return;
   }
