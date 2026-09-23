@@ -6,6 +6,7 @@ import {
   getDoc,
   getDocs,
   limit,
+  orderBy,
   query,
   where,
   onSnapshot,
@@ -644,6 +645,76 @@ export async function loadTaskHistory(taskId: string): Promise<ActivityEvent[]> 
     list = snap.docs.map((d) => eventFrom(d.id, d.data()));
   }
   return list.sort((a, b) => (b.at?.getTime() ?? Date.now()) - (a.at?.getTime() ?? Date.now()));
+}
+
+// ---------- Комментарии ----------
+
+export const COMMENT_MAX = 4000;
+
+export interface Comment {
+  id: string;
+  text: string;
+  author: string;
+  at: Date | null;
+}
+
+const demoComments = new Map<string, Comment[]>();
+const demoCommentListeners = new Map<string, Set<(list: Comment[]) => void>>();
+
+/**
+ * Подписка на комментарии задачи — только пока открыта карточка. Возвращает отписку.
+ * Последние 200 по времени; время ещё не записанного сервером — оценка.
+ */
+export function watchComments(taskId: string, cb: (list: Comment[]) => void, onError: (e: unknown) => void): () => void {
+  const s = session!;
+  if (demo) {
+    const set = demoCommentListeners.get(taskId) ?? new Set();
+    set.add(cb);
+    demoCommentListeners.set(taskId, set);
+    cb(demoComments.get(taskId) ?? []);
+    return () => set.delete(cb);
+  }
+  const q = query(
+    collection(db, 'workspaces', s.workspace.id, 'tasks', taskId, 'comments'),
+    orderBy('createdAt', 'desc'),
+    limit(200),
+  );
+  let first = true;
+  return onSnapshot(
+    q,
+    { includeMetadataChanges: false },
+    (snap) => {
+      // Пустой первый ответ сервера — всё равно одно чтение
+      if (!snap.metadata.fromCache) countReads(first ? Math.max(1, snap.docChanges().length) : snap.docChanges().length, 'комментарии');
+      first = false;
+      cb(
+        snap.docs
+          .map((d) => {
+            const data = d.data({ serverTimestamps: 'estimate' });
+            const at = data.createdAt as Timestamp | null;
+            return { id: d.id, text: String(data.text ?? ''), author: String(data.author ?? ''), at: at ? at.toDate() : null };
+          })
+          .reverse(),
+      );
+    },
+    onError,
+  );
+}
+
+/** Добавить комментарий. Одна запись; в ленту не попадает. */
+export function addComment(taskId: string, text: string): Promise<void> {
+  const s = session!;
+  const clean = text.trim().slice(0, COMMENT_MAX);
+  if (!clean) return Promise.resolve();
+  countWrites(1, 'комментарий');
+  if (demo) {
+    const list = [...(demoComments.get(taskId) ?? []), { id: String(Date.now()), text: clean, author: s.uid, at: new Date() }];
+    demoComments.set(taskId, list);
+    demoCommentListeners.get(taskId)?.forEach((fn) => fn(list));
+    return Promise.resolve();
+  }
+  const ref = doc(collection(db, 'workspaces', s.workspace.id, 'tasks', taskId, 'comments'));
+  return writeBatch(db).set(ref, { text: clean, author: s.uid, createdAt: serverTimestamp() }).commit();
 }
 
 /** Демо-режим (только dev): состояние из готовых данных, без обращений к Firestore. */

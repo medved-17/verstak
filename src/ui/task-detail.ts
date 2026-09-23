@@ -3,9 +3,12 @@
 // последнего ввода; выпадающие списки пишутся сразу; чипы — через секунду после последнего
 // клика, чтобы несколько щелчков дали одну запись. При закрытии несохранённое уходит сразу.
 import {
+  addComment,
   can,
+  COMMENT_MAX,
   DESCR_MAX,
   getAllTags,
+  getMember,
   getMembers,
   getSession,
   getTask,
@@ -13,6 +16,7 @@ import {
   onChange,
   TITLE_MAX,
   updateTask,
+  watchComments,
   type Priority,
   type Task,
   type TaskInput,
@@ -56,6 +60,7 @@ export function openTaskDetail(id: string): void {
   let pending: Partial<TaskInput> = {};
   let timer = 0;
   let unsubscribe: () => void = () => undefined;
+  let unwatchComments: () => void = () => undefined;
 
   const { el, close } = openModal(
     `
@@ -86,13 +91,20 @@ export function openTaskDetail(id: string): void {
       <label class="fld"><span class="k">Описание</span>
         <textarea class="inp" name="descr" rows="6" maxlength="${DESCR_MAX}" placeholder="${mode === 'full' ? 'Подробности, ссылки, критерии готовности' : ''}">${esc(task.descr)}</textarea>
       </label>
-      <div class="fld" data-slot="comments"></div>
+      <div class="fld"><span class="k">Комментарии</span>
+        <div class="feed" id="td-comments"><div class="empty2">Загрузка…</div></div>
+        ${can.comment() ? `<div class="td-comment">
+          <textarea class="inp" name="comment" rows="2" maxlength="${COMMENT_MAX}" placeholder="Написать комментарий… (Ctrl+Enter — отправить)"></textarea>
+          <button type="button" class="btn" data-act="comment">Отправить</button>
+        </div>` : ''}
+      </div>
       <div class="fld"><span class="k">История</span><div class="feed" id="td-history"><div class="empty2">Загрузка…</div></div></div>
       <div class="acts"><button type="button" class="btn" data-act="close">Закрыть</button></div>
     </div>`,
     () => {
       flush();
       unsubscribe();
+      unwatchComments();
     },
   );
   el.classList.add('modal-wide');
@@ -107,7 +119,10 @@ export function openTaskDetail(id: string): void {
   // Права: отключаем всё, что менять нельзя
   if (mode !== 'full') {
     root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('.inp, .chip').forEach((c) => {
-      if (!(mode === 'status' && c.getAttribute('name') === 'status')) c.disabled = true;
+      const name = c.getAttribute('name');
+      // Комментарий — отдельное право; статус — у комментатора для своей задачи
+      if (name === 'comment' || (mode === 'status' && name === 'status')) return;
+      c.disabled = true;
     });
     newTag.hidden = true;
   }
@@ -186,6 +201,10 @@ export function openTaskDetail(id: string): void {
       close();
       return;
     }
+    if (t.closest('[data-act=comment]')) {
+      sendComment();
+      return;
+    }
     const chip = t.closest<HTMLButtonElement>('.chip');
     if (!chip || chip.disabled) return;
     chip.setAttribute('aria-pressed', String(chip.getAttribute('aria-pressed') !== 'true'));
@@ -240,6 +259,47 @@ export function openTaskDetail(id: string): void {
       );
     }
   });
+
+  // ---------- комментарии ----------
+
+  const commentsEl = root.querySelector<HTMLElement>('#td-comments')!;
+  const commentInput = root.querySelector<HTMLTextAreaElement>('[name=comment]');
+
+  function sendComment(): void {
+    if (!commentInput) return;
+    const text = commentInput.value;
+    if (!text.trim()) return;
+    commentInput.value = '';
+    addComment(id, text).catch((e) => {
+      console.error('Комментарий не отправлен', e);
+      commentInput.value = text;
+      toast(writeErrorText(e), 'bad');
+    });
+  }
+
+  commentInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      sendComment();
+    }
+  });
+
+  unwatchComments = watchComments(
+    id,
+    (list) => {
+      commentsEl.innerHTML = list.length
+        ? list
+            .map(
+              (c) => `<div class="fitem">${avatarHtml(c.author)}<span><b class="td-author">${esc(getMember(c.author)?.name ?? 'Бывший участник')}</b> <span class="td-text">${esc(c.text)}</span><span class="tm">${eventTime(c.at)}</span></span></div>`,
+            )
+            .join('')
+        : '<div class="empty2">Комментариев пока нет.</div>';
+    },
+    (e) => {
+      console.error('Комментарии не загрузились', e);
+      commentsEl.innerHTML = '<div class="empty2">Комментарии не удалось загрузить.</div>';
+    },
+  );
 
   // ---------- история ----------
 

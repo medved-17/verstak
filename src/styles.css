@@ -177,3 +177,11 @@ dialog.modal.modal-wide{width:min(720px,calc(100vw - 32px))}
 .td-save{white-space:nowrap;padding-top:8px;min-width:0}
 .inp:disabled{color:var(--ink-2);background:var(--surface-2);cursor:default}
 .chip:disabled{cursor:default}
+
+/* Комментарии в карточке */
+.td-comment{display:flex;gap:8px;align-items:flex-end;margin-top:6px}
+.td-comment textarea{flex:1;resize:vertical}
+.td-author{font-weight:500;color:var(--ink)}
+.td-text{white-space:pre-wrap;overflow-wrap:anywhere}
+/* В макете у времени margin-top, но span строчный и время прилипает к тексту — ставим отдельной строкой */
+.fitem .tm{display:block}
