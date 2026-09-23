@@ -342,6 +342,27 @@ export function deleteView(id: string): Promise<void> {
   return writeBatch(db).delete(doc(db, 'workspaces', s.workspace.id, 'views', id)).commit();
 }
 
+/**
+ * Отладка правил (только dev): попытаться создать задачу напрямую, минуя интерфейс.
+ * Под читателем или в чужом пространстве должен вернуться отказ permission-denied.
+ */
+export async function probeWrite(wsId?: string): Promise<string> {
+  const id = wsId ?? session?.workspace.id;
+  if (!id || !session) return 'сначала войдите';
+  try {
+    const ref = doc(collection(db, 'workspaces', id, 'tasks'));
+    await writeBatch(db)
+      .set(ref, {
+        title: 'Проба записи из консоли', descr: '', status: 'backlog', assignees: [], due: null, priority: 3,
+        tags: [], order: 0, createdBy: session.uid, createdAt: serverTimestamp(), updatedBy: session.uid, updatedAt: serverTimestamp(),
+      })
+      .commit();
+    return `записано: задача ${ref.id} (удалите её вручную)`;
+  } catch (e) {
+    return `ошибка: ${(e as { code?: string }).code ?? String(e)}`;
+  }
+}
+
 // ---------- Живое состояние пространства ----------
 // Одна подписка на все задачи и одна на участников. Живут, пока открыта сессия;
 // переключение между видами новых запросов не создаёт — вьюхи читают эти Map.

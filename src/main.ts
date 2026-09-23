@@ -17,6 +17,7 @@ import {
   onChange,
   openSession,
   probeTasks,
+  probeWrite,
   startDemo,
   startLive,
   stopLive,
@@ -37,7 +38,7 @@ import { viewPeople } from './views/people';
 import type { ViewResult } from './views/types';
 
 // Счётчики чтений и записей доступны из консоли всегда, отладка правил — только при npm run dev
-Object.assign(window, { verstak: { reads: getReads, writes: getWrites, ...(import.meta.env.DEV ? { probeTasks, tasks: getTasks } : {}) } });
+Object.assign(window, { verstak: { reads: getReads, writes: getWrites, ...(import.meta.env.DEV ? { probeTasks, probeWrite, tasks: getTasks } : {}) } });
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 
