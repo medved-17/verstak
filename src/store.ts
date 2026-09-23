@@ -5,6 +5,9 @@ import {
   doc,
   getDoc,
   getDocs,
+  limit,
+  query,
+  where,
   onSnapshot,
   runTransaction,
   serverTimestamp,
@@ -144,12 +147,27 @@ function countDoc(snap: DocumentSnapshot, what: string): void {
   if (!snap.metadata.fromCache) countReads(1, what);
 }
 
-function countQuery(snap: QuerySnapshot, what: string): void {
-  if (!snap.metadata.fromCache) countReads(snap.docChanges().length, what);
+/** oneShot — разовый запрос: пустой ответ сервера всё равно стоит одно чтение. */
+function countQuery(snap: QuerySnapshot, what: string, oneShot = false): void {
+  if (snap.metadata.fromCache) return;
+  const n = snap.docChanges().length;
+  countReads(oneShot ? Math.max(1, n) : n, what);
 }
 
 export function getReads(): number {
   return reads;
+}
+
+// Записи считаем так же — лимит бесплатного тарифа 20 000 в сутки
+let writes = 0;
+
+function countWrites(n: number, what: string): void {
+  writes += n;
+  console.debug(`[записи] +${n} ${what}, всего ${writes}`);
+}
+
+export function getWrites(): number {
+  return writes;
 }
 
 function displayName(user: User): string {
@@ -222,7 +240,7 @@ export async function openSession(user: User): Promise<Session> {
 export async function probeTasks(wsId: string): Promise<string> {
   try {
     const snap = await getDocs(collection(db, 'workspaces', wsId, 'tasks'));
-    countQuery(snap, 'проба задач');
+    countQuery(snap, 'проба задач', true);
     return `прочитано задач: ${snap.size}`;
   } catch (e) {
     return `ошибка: ${(e as { code?: string }).code ?? String(e)}`;
@@ -392,6 +410,7 @@ export function createTask(input: TaskInput): Promise<string> {
   const data = cleanInput(input);
   const ref = doc(collection(db, 'workspaces', s.workspace.id, 'tasks'));
   const order = topOrder(data.status);
+  countWrites(1, 'новая задача');
   if (demo) {
     tasks.set(ref.id, { id: ref.id, ...data, order, createdBy: s.uid, updatedBy: s.uid });
     emit();
@@ -416,6 +435,7 @@ export function updateTask(id: string, patch: Partial<TaskInput>): Promise<void>
   // Смена статуса из окна задачи — наверх новой колонки
   const cur = tasks.get(id);
   if (data.status !== undefined && cur && data.status !== cur.status) data.order = topOrder(data.status);
+  countWrites(1, 'правка задачи: ' + Object.keys(data).join(', '));
   if (demo) {
     const t = tasks.get(id);
     if (t) tasks.set(id, { ...t, ...data, updatedBy: s.uid });
@@ -460,6 +480,7 @@ export function moveTask(id: string, status: string, index: number): Promise<voi
 
   const tooClose = (prev && order - prev.order < 1e-6) || (next && next.order - order < 1e-6);
   const ref = (taskId: string) => doc(db, 'workspaces', s.workspace.id, 'tasks', taskId);
+  countWrites(tooClose ? col.length + 1 : 1, tooClose ? 'перенумерация колонки' : 'перенос карточки');
 
   if (demo) {
     if (tooClose) {
@@ -497,6 +518,7 @@ export function invitableRoles(): Role[] {
 /** Сменить роль участника. Одна запись. */
 export function setRole(uid: string, role: Role): Promise<void> {
   const s = session!;
+  countWrites(1, 'роль');
   if (demo) {
     const m = members.get(uid);
     if (m) members.set(uid, { ...m, role });
@@ -511,6 +533,7 @@ export async function createInvite(role: Role): Promise<{ token: string; expires
   const s = session!;
   const ref = doc(collection(db, 'invites'));
   const expiresAt = new Date(Date.now() + INVITE_DAYS * 86400000);
+  countWrites(1, 'приглашение');
   if (!demo) {
     await writeBatch(db)
       .set(ref, { ws: s.workspace.id, role, createdBy: s.uid, expiresAt: Timestamp.fromDate(expiresAt) })
@@ -574,9 +597,65 @@ export async function acceptInvite(user: User, token: string): Promise<string> {
   return inv.ws;
 }
 
+// ---------- История задачи ----------
+
+/** Событие ленты: создание, смена статуса, назначение, перенос срока. */
+export interface ActivityEvent {
+  id: string;
+  actor: string;
+  verb: 'created' | 'status' | 'assigned' | 'due' | string;
+  taskId: string;
+  taskTitle: string;
+  at: Date | null;
+  from?: string;
+  to?: string;
+}
+
+let demoActivity: ActivityEvent[] = [];
+
+function eventFrom(id: string, d: Record<string, unknown>): ActivityEvent {
+  const at = d.at as Timestamp | null | undefined;
+  return {
+    id,
+    actor: String(d.actor ?? ''),
+    verb: String(d.verb ?? ''),
+    taskId: String(d.taskId ?? ''),
+    taskTitle: String(d.taskTitle ?? ''),
+    at: at && typeof at.toDate === 'function' ? at.toDate() : null,
+    from: d.from === undefined ? undefined : String(d.from),
+    to: d.to === undefined ? undefined : String(d.to),
+  };
+}
+
+/**
+ * История задачи — события ленты по taskId. Читается только при открытии карточки.
+ * Сортировка на месте, а не orderBy в запросе: так не нужен составной индекс.
+ */
+export async function loadTaskHistory(taskId: string): Promise<ActivityEvent[]> {
+  const s = session!;
+  let list: ActivityEvent[];
+  if (demo) {
+    list = demoActivity.filter((e) => e.taskId === taskId);
+  } else {
+    const snap = await getDocs(
+      query(collection(db, 'workspaces', s.workspace.id, 'activity'), where('taskId', '==', taskId), limit(100)),
+    );
+    countQuery(snap, 'история задачи', true);
+    list = snap.docs.map((d) => eventFrom(d.id, d.data()));
+  }
+  return list.sort((a, b) => (b.at?.getTime() ?? Date.now()) - (a.at?.getTime() ?? Date.now()));
+}
+
 /** Демо-режим (только dev): состояние из готовых данных, без обращений к Firestore. */
-export function startDemo(data: { workspace: Workspace; members: Member[]; tasks: Task[]; uid: string }): void {
+export function startDemo(data: {
+  workspace: Workspace;
+  members: Member[];
+  tasks: Task[];
+  uid: string;
+  activity?: ActivityEvent[];
+}): void {
   demo = true;
+  demoActivity = data.activity ?? [];
   const me = data.members.find((m) => m.uid === data.uid)!;
   session = { uid: data.uid, workspace: data.workspace, me };
   data.members.forEach((m) => members.set(m.uid, m));

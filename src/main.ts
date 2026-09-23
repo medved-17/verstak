@@ -8,6 +8,7 @@ import {
   getLiveError,
   getMembers,
   getReads,
+  getWrites,
   getSession,
   getTasks,
   isDone,
@@ -24,6 +25,7 @@ import {
 import { avatarHtml } from './ui/avatar';
 import { esc, pl } from './ui/dom';
 import { openInviteForm } from './ui/invite-form';
+import { openTaskDetail } from './ui/task-detail';
 import { openTaskForm } from './ui/task-form';
 import { toast, writeErrorText } from './ui/toast';
 import { viewBoard } from './views/board';
@@ -33,8 +35,8 @@ import { viewMy } from './views/my';
 import { viewPeople } from './views/people';
 import type { ViewResult } from './views/types';
 
-// Счётчик чтений доступен из консоли всегда, отладка правил — только при npm run dev
-Object.assign(window, { verstak: { reads: getReads, ...(import.meta.env.DEV ? { probeTasks, tasks: getTasks } : {}) } });
+// Счётчики чтений и записей доступны из консоли всегда, отладка правил — только при npm run dev
+Object.assign(window, { verstak: { reads: getReads, writes: getWrites, ...(import.meta.env.DEV ? { probeTasks, tasks: getTasks } : {}) } });
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 
@@ -197,7 +199,7 @@ function renderShell(): void {
       return;
     }
     const card = t.closest<HTMLElement>('.t-card[data-id], .row[data-id]');
-    if (card) openTaskForm(card.dataset.id);
+    if (card) openTaskDetail(card.dataset.id!);
   });
 }
 

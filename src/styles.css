@@ -167,3 +167,13 @@ textarea.inp{resize:vertical;line-height:1.5}
 /* Недоступные по роли действия */
 .row button.chk:disabled{cursor:default;opacity:.6}
 .t-card[draggable="false"]{cursor:pointer}
+
+/* Карточка задачи */
+dialog.modal.modal-wide{width:min(720px,calc(100vw - 32px))}
+.td-head{display:flex;gap:12px;align-items:flex-start}
+.td-title{flex:1;resize:none;overflow:hidden;font-size:18px;font-weight:600;line-height:1.35;border-color:transparent;padding:4px 8px;margin-left:-8px}
+.td-title:hover:not(:disabled),.td-title:focus{border-color:var(--rule)}
+.td-title:disabled{background:transparent;color:var(--ink)}
+.td-save{white-space:nowrap;padding-top:8px;min-width:0}
+.inp:disabled{color:var(--ink-2);background:var(--surface-2);cursor:default}
+.chip:disabled{cursor:default}
