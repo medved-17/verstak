@@ -35,6 +35,7 @@ import { viewFeed } from './views/feed';
 import { ALL, countForView, viewList } from './views/list';
 import { viewMy } from './views/my';
 import { viewPeople } from './views/people';
+import { viewTimeline } from './views/timeline';
 import type { ViewResult } from './views/types';
 
 // Счётчики чтений и записей доступны из консоли всегда, отладка правил — только при npm run dev
@@ -86,7 +87,7 @@ function renderSessionError(user: User, error: string): void {
 
 // ---------- Маршрут ----------
 
-type RouteName = 'my' | 'board' | 'list' | 'people' | 'feed';
+type RouteName = 'my' | 'board' | 'timeline' | 'list' | 'people' | 'feed';
 
 interface Route {
   name: RouteName;
@@ -95,7 +96,7 @@ interface Route {
 
 function parseRoute(): Route {
   const [name = '', arg = ''] = location.hash.replace(/^#\/?/, '').split('/');
-  if (name === 'board' || name === 'people' || name === 'feed') return { name, arg: '' };
+  if (name === 'board' || name === 'timeline' || name === 'people' || name === 'feed') return { name, arg: '' };
   if (name === 'list' && arg) return { name, arg: decodeURIComponent(arg) };
   return { name: 'my', arg: '' };
 }
@@ -148,6 +149,7 @@ function go(hash: string): void {
 const NAV: { v: RouteName; ic: string; label: string }[] = [
   { v: 'my', ic: '◎', label: 'Мои задачи' },
   { v: 'board', ic: '▤', label: 'Доска' },
+  { v: 'timeline', ic: '┅', label: 'Шкала сроков' },
   { v: 'people', ic: '◍', label: 'Люди' },
   { v: 'feed', ic: '≡', label: 'Лента' },
 ];
@@ -206,7 +208,7 @@ function renderShell(): void {
       toggleDone(chk.dataset.id!).catch((err) => toast(writeErrorText(err), 'bad'));
       return;
     }
-    const card = t.closest<HTMLElement>('.t-card[data-id], .row[data-id]');
+    const card = t.closest<HTMLElement>('.t-card[data-id], .row[data-id], .tl-dot[data-id]');
     if (card) openTaskDetail(card.dataset.id!);
     const ev = t.closest<HTMLElement>('.fitem[data-task]');
     if (ev) openTaskDetail(ev.dataset.task!);
@@ -259,6 +261,8 @@ function viewFor(route: Route): ViewResult {
   switch (route.name) {
     case 'board':
       return viewBoard();
+    case 'timeline':
+      return viewTimeline();
     case 'list':
       return viewList(route.arg);
     case 'people':
