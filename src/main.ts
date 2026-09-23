@@ -3,6 +3,8 @@
 import './styles.css';
 import { authErrorText, initials, signInWithGoogle, signOut, watchUser, type User } from './auth';
 import {
+  acceptInvite,
+  InviteError,
   getLiveError,
   getMembers,
   getReads,
@@ -20,6 +22,7 @@ import {
 } from './store';
 import { avatarHtml } from './ui/avatar';
 import { esc, pl } from './ui/dom';
+import { openInviteForm } from './ui/invite-form';
 import { openTaskForm } from './ui/task-form';
 import { toast, writeErrorText } from './ui/toast';
 import { viewBoard } from './views/board';
@@ -45,7 +48,9 @@ function renderSignedOut(error: string | null = null): void {
     <main class="gate">
       <div class="panel">
         <h1>Верстак</h1>
-        <p class="lead">Трекер задач команды. Войдите, чтобы увидеть свои задачи.</p>
+        <p class="lead">${
+          pendingInvite() ? 'Вас пригласили в пространство. Войдите, чтобы принять приглашение.' : 'Трекер задач команды. Войдите, чтобы увидеть свои задачи.'
+        }</p>
         <button class="btn pri" id="signin">Войти через Google</button>
         ${error ? `<p class="err">${esc(error)}</p>` : ''}
       </div>
@@ -89,6 +94,45 @@ function parseRoute(): Route {
   if (name === 'list' && arg) return { name, arg: decodeURIComponent(arg) };
   return { name: 'my', arg: '' };
 }
+
+// Приглашение: #/invite/<токен>. Токен запоминаем до входа — на случай входа через redirect.
+const INVITE_KEY = 'verstak.invite';
+
+function inviteFromHash(): string | null {
+  const m = location.hash.match(/^#\/invite\/([A-Za-z0-9]+)/);
+  return m ? m[1] : null;
+}
+
+function pendingInvite(): string | null {
+  const fromHash = inviteFromHash();
+  if (fromHash) {
+    try {
+      sessionStorage.setItem(INVITE_KEY, fromHash);
+    } catch {
+      // хранилище недоступно — обойдёмся hash
+    }
+    return fromHash;
+  }
+  try {
+    return sessionStorage.getItem(INVITE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function forgetInvite(): void {
+  try {
+    sessionStorage.removeItem(INVITE_KEY);
+  } catch {
+    // нечего чистить
+  }
+}
+
+const INVITE_ERRORS: Record<InviteError['reason'], string> = {
+  'not-found': 'Приглашение не найдено. Проверьте ссылку.',
+  used: 'Это приглашение уже использовано. Попросите новую ссылку.',
+  expired: 'Срок приглашения истёк. Попросите новую ссылку.',
+};
 
 function go(hash: string): void {
   if (location.hash !== hash) location.hash = hash;
@@ -140,6 +184,10 @@ function renderShell(): void {
     const t = e.target as HTMLElement;
     if (t.closest('[data-act=add]')) {
       openTaskForm();
+      return;
+    }
+    if (t.closest('[data-act=invite]')) {
+      openInviteForm();
       return;
     }
     const chk = t.closest<HTMLElement>('.chk[data-id]');
@@ -246,12 +294,33 @@ function scheduleRender(): void {
 }
 
 onChange(scheduleRender);
-window.addEventListener('hashchange', render);
+window.addEventListener('hashchange', () => {
+  // Ссылка-приглашение открыта во вкладке, где уже выполнен вход, — принимаем заново с начала
+  if (inviteFromHash() && getSession()) {
+    pendingInvite();
+    location.reload();
+    return;
+  }
+  render();
+});
 
 // ---------- Вход и выход ----------
 
 async function onSignedIn(user: User): Promise<void> {
   renderLoading('Открываем пространство…');
+  // Сначала приглашение: иначе новому человеку создалось бы своё пустое пространство
+  let inviteNote: string | null = null;
+  const token = pendingInvite();
+  if (token) {
+    try {
+      await acceptInvite(user, token);
+    } catch (e) {
+      console.error('Приглашение не принято', e);
+      inviteNote = e instanceof InviteError ? INVITE_ERRORS[e.reason] : 'Не удалось принять приглашение. Проверьте связь и откройте ссылку ещё раз.';
+    }
+    forgetInvite();
+    history.replaceState(null, '', location.pathname + location.search + '#/my');
+  }
   try {
     await openSession(user);
   } catch (e) {
@@ -268,6 +337,8 @@ async function onSignedIn(user: User): Promise<void> {
   renderShell();
   startLive();
   render();
+  if (inviteNote) toast(inviteNote, 'bad');
+  else if (token) toast(`Вы в пространстве «${getSession()!.workspace.name}»`);
 }
 
 async function startDemoMode(): Promise<void> {

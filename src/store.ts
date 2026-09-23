@@ -8,10 +8,10 @@ import {
   onSnapshot,
   runTransaction,
   serverTimestamp,
+  Timestamp,
   writeBatch,
   type DocumentSnapshot,
   type QuerySnapshot,
-  type Timestamp,
   type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from './firebase';
@@ -461,6 +461,84 @@ export function moveTask(id: string, status: string, index: number): Promise<voi
     batch.update(ref(id), { status, order, updatedBy: s.uid, updatedAt: serverTimestamp() });
   }
   return batch.commit();
+}
+
+// ---------- Приглашения ----------
+
+export const INVITE_DAYS = 7;
+
+/** Роли, которые может выдать текущий человек: владелец и администратор — всё, кроме владельца. */
+export function invitableRoles(): Role[] {
+  const r = session?.me.role;
+  return r === 'owner' || r === 'admin' ? ['admin', 'member', 'commenter', 'viewer'] : [];
+}
+
+/** Создать приглашение на 7 дней. Одна запись. Возвращает токен и срок. */
+export async function createInvite(role: Role): Promise<{ token: string; expiresAt: Date }> {
+  const s = session!;
+  const ref = doc(collection(db, 'invites'));
+  const expiresAt = new Date(Date.now() + INVITE_DAYS * 86400000);
+  if (!demo) {
+    await writeBatch(db)
+      .set(ref, { ws: s.workspace.id, role, createdBy: s.uid, expiresAt: Timestamp.fromDate(expiresAt) })
+      .commit();
+  }
+  return { token: ref.id, expiresAt };
+}
+
+export class InviteError extends Error {
+  constructor(public reason: 'not-found' | 'used' | 'expired') {
+    super(reason);
+  }
+}
+
+/** Цвет аватара нового участника — по uid, чтобы не читать список участников до вступления. */
+function colorFor(uid: string): string {
+  let h = 0;
+  for (const ch of uid) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
+}
+
+/**
+ * Принять приглашение: одним пакетом создать members/{uid} с ролью из приглашения,
+ * пометить приглашение использованным и поставить пространство первым в профиле,
+ * чтобы оно открывалось при входе. Уже состоящий в пространстве приглашение не тратит.
+ */
+export async function acceptInvite(user: User, token: string): Promise<string> {
+  const invSnap = await getDoc(doc(db, 'invites', token));
+  countDoc(invSnap, 'приглашение');
+  if (!invSnap.exists()) throw new InviteError('not-found');
+  const inv = invSnap.data() as { ws: string; role: Role; expiresAt: Timestamp; usedBy?: string };
+
+  const userRef = doc(db, 'users', user.uid);
+  const userSnap = await getDoc(userRef);
+  countDoc(userSnap, 'профиль');
+  const list: string[] = userSnap.exists() ? (userSnap.data().workspaces ?? []) : [];
+  const reordered = [inv.ws, ...list.filter((w) => w !== inv.ws)];
+
+  if (list.includes(inv.ws) || inv.usedBy === user.uid) {
+    // Уже участник — просто открыть это пространство
+    if (list[0] !== inv.ws) await writeBatch(db).set(userRef, { workspaces: reordered }, { merge: true }).commit();
+    return inv.ws;
+  }
+  if (inv.usedBy) throw new InviteError('used');
+  if (inv.expiresAt.toMillis() < Date.now()) throw new InviteError('expired');
+
+  const name = displayName(user);
+  const email = user.email ?? '';
+  const batch = writeBatch(db);
+  batch.set(doc(db, 'workspaces', inv.ws, 'members', user.uid), {
+    role: inv.role,
+    name,
+    email,
+    color: colorFor(user.uid),
+    joinedAt: serverTimestamp(),
+    invite: token,
+  });
+  batch.update(doc(db, 'invites', token), { usedBy: user.uid });
+  batch.set(userRef, { name, email, workspaces: reordered }, { merge: true });
+  await batch.commit();
+  return inv.ws;
 }
 
 /** Демо-режим (только dev): состояние из готовых данных, без обращений к Firestore. */

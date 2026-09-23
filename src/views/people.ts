@@ -1,5 +1,5 @@
 // «Люди»: участники, роль, активные и просроченные задачи, полоска нагрузки — как в макете
-import { getMembers, getTasks, isDone, type Role } from '../store';
+import { getMembers, getTasks, invitableRoles, isDone, type Role } from '../store';
 import { avatarHtml } from '../ui/avatar';
 import { esc, pl } from '../ui/dom';
 import { isOverdue } from '../ui/pills';
@@ -35,7 +35,9 @@ export function viewPeople(): ViewResult {
     })
     .join('');
   return {
-    bar: `<h3>Люди</h3><span class="pill">${pl(members.length, 'участник', 'участника', 'участников')}</span>`,
+    bar: `<h3>Люди</h3><span class="pill">${pl(members.length, 'участник', 'участника', 'участников')}</span>${
+      invitableRoles().length ? '<span class="sp"><button class="btn pri" data-act="invite">+ Пригласить</button></span>' : ''
+    }`,
     body: `<div class="people">${rows}</div>`,
   };
 }
