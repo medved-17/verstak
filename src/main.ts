@@ -8,6 +8,7 @@ import {
   getReads,
   getSession,
   getTasks,
+  isDone,
   isLoaded,
   onChange,
   openSession,
@@ -15,10 +16,12 @@ import {
   startDemo,
   startLive,
   stopLive,
+  toggleDone,
 } from './store';
 import { avatarHtml } from './ui/avatar';
 import { esc, pl } from './ui/dom';
 import { openTaskForm } from './ui/task-form';
+import { toast, writeErrorText } from './ui/toast';
 import { viewBoard } from './views/board';
 import { viewFeed } from './views/feed';
 import { viewList } from './views/list';
@@ -129,8 +132,13 @@ function renderShell(): void {
       openTaskForm();
       return;
     }
+    const chk = t.closest<HTMLElement>('.chk[data-id]');
+    if (chk) {
+      toggleDone(chk.dataset.id!).catch((err) => toast(writeErrorText(err), 'bad'));
+      return;
+    }
     const card = t.closest<HTMLElement>('.t-card[data-id], .row[data-id]');
-    if (card && !t.closest('.chk')) openTaskForm(card.dataset.id);
+    if (card) openTaskForm(card.dataset.id);
   });
 }
 
@@ -146,7 +154,7 @@ function renderNav(route: Route): void {
     const el = app.querySelector('#' + id);
     if (el) el.textContent = loaded ? text : '';
   };
-  set('c-my', String(tasks.filter((t) => t.assignees.includes(s.uid) && t.status !== 'done').length));
+  set('c-my', String(tasks.filter((t) => t.assignees.includes(s.uid) && !isDone(t)).length));
   set('c-board', String(tasks.length));
   set('c-people', String(nMembers));
   set('ws-sub', pl(nMembers, 'участник', 'участника', 'участников'));

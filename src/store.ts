@@ -67,6 +67,32 @@ export interface Task {
   updatedAt?: Timestamp;
 }
 
+/** Ключ статуса «Готово»: 'done', а если его нет в настройках — последняя колонка. */
+export function doneKey(): string {
+  const st = session?.workspace.statuses ?? DEFAULT_STATUSES;
+  return st.some((x) => x.key === 'done') ? 'done' : (st[st.length - 1]?.key ?? 'done');
+}
+
+/** Куда возвращается задача при снятии отметки: «В работе», иначе первая колонка. */
+export function reopenKey(): string {
+  const st = session?.workspace.statuses ?? DEFAULT_STATUSES;
+  return st.some((x) => x.key === 'now') ? 'now' : (st[0]?.key ?? 'now');
+}
+
+export function isDone(t: Task): boolean {
+  return t.status === doneKey();
+}
+
+export function statusName(key: string): string {
+  return session?.workspace.statuses.find((x) => x.key === key)?.name ?? key;
+}
+
+/** Отметка выполнения: одна запись статуса. */
+export function toggleDone(id: string): Promise<void> {
+  const t = tasks.get(id)!;
+  return updateTask(id, { status: isDone(t) ? reopenKey() : doneKey() });
+}
+
 // Цвета аватаров — из макета
 export const AVATAR_COLORS = ['#2440B5', '#1A6A4D', '#855100', '#5B3A8C', '#973040', '#657083'];
 

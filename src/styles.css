@@ -153,3 +153,7 @@ textarea.inp{resize:vertical;line-height:1.5}
 
 /* Место вставки при перетаскивании (в макете только подсветка колонки) */
 .drop-line{height:2px;border-radius:2px;background:var(--accent);margin:-4px 2px}
+
+/* Отметка выполнения — кнопка вместо span из макета (доступна с клавиатуры), вид тот же */
+.row button.chk{padding:0;background:transparent;font-family:inherit;line-height:1}
+.row{cursor:pointer}

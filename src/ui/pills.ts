@@ -1,5 +1,5 @@
 // Пилюли: срок, приоритет, метка, статус — как в макете
-import type { Task } from '../store';
+import { isDone, statusName, type Task } from '../store';
 import { esc } from './dom';
 
 /** Сегодня в формате 'YYYY-MM-DD' по местному времени. */
@@ -16,14 +16,14 @@ export function daysFromToday(due: string): number {
 }
 
 export function isOverdue(t: Task): boolean {
-  return t.status !== 'done' && !!t.due && daysFromToday(t.due) < 0;
+  return !isDone(t) && !!t.due && daysFromToday(t.due) < 0;
 }
 
 /** Подпись срока: «просрочено», «сегодня», «завтра» или «2 окт.». */
 export function dueLabel(t: Task): string {
   if (!t.due) return '';
   const dd = daysFromToday(t.due);
-  if (dd < 0 && t.status !== 'done') return 'просрочено';
+  if (dd < 0 && !isDone(t)) return 'просрочено';
   if (dd === 0) return 'сегодня';
   if (dd === 1) return 'завтра';
   const [y, m, d] = t.due.split('-').map(Number);
@@ -32,7 +32,7 @@ export function dueLabel(t: Task): string {
 
 /** Класс пилюли срока: late — просрочено, due — сегодня или завтра. У сделанных задач срок не горит. */
 export function dueClass(t: Task): string {
-  if (!t.due || t.status === 'done') return '';
+  if (!t.due || isDone(t)) return '';
   const dd = daysFromToday(t.due);
   return dd < 0 ? 'late' : dd <= 1 ? 'due' : '';
 }
@@ -48,4 +48,8 @@ export function priorityPill(t: Task): string {
 /** На карточке — первая метка, как в макете. */
 export function tagPill(t: Task): string {
   return t.tags.length ? `<span class="pill">${esc(t.tags[0])}</span>` : '';
+}
+
+export function statusPill(t: Task): string {
+  return `<span class="pill">${esc(statusName(t.status))}</span>`;
 }
