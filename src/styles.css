@@ -150,3 +150,6 @@ textarea.inp{resize:vertical;line-height:1.5}
 /* Уведомление */
 .toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:30;background:var(--surface);border:1px solid var(--rule);color:var(--ink-2);border-radius:999px;padding:8px 14px;font-size:13px;box-shadow:0 12px 40px rgba(20,26,38,.07);max-width:calc(100vw - 32px)}
 .toast.bad{background:var(--bad-bg);color:var(--bad);border-color:transparent}
+
+/* Место вставки при перетаскивании (в макете только подсветка колонки) */
+.drop-line{height:2px;border-radius:2px;background:var(--accent);margin:-4px 2px}

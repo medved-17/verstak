@@ -383,6 +383,60 @@ export function updateTask(id: string, patch: Partial<TaskInput>): Promise<void>
   return batch.commit();
 }
 
+/**
+ * Перетаскивание: поставить задачу в колонку status на место index (среди остальных
+ * задач колонки, без неё самой). Новый order — среднее соседей, одна запись:
+ * status, order и служебные updated*. Если соседи ближе 1e-6 — колонка
+ * перенумеровывается целиком одним пакетом (раз в сотни перетаскиваний).
+ * Возвращает false, если место не изменилось и писать нечего.
+ */
+export function moveTask(id: string, status: string, index: number): Promise<void> | false {
+  const s = session!;
+  const t = tasks.get(id);
+  if (!t) return false;
+  const col = [...tasks.values()]
+    .filter((x) => x.status === status && x.id !== id)
+    .sort((a, b) => a.order - b.order);
+  const i = Math.max(0, Math.min(index, col.length));
+  const prev = col[i - 1];
+  const next = col[i];
+
+  // Уже стоит здесь — ничего не пишем
+  if (t.status === status && (!prev || prev.order < t.order) && (!next || t.order < next.order)) return false;
+
+  let order: number;
+  if (prev && next) order = (prev.order + next.order) / 2;
+  else if (prev) order = prev.order + 1;
+  else if (next) order = next.order - 1;
+  else order = 1;
+
+  const tooClose = (prev && order - prev.order < 1e-6) || (next && next.order - order < 1e-6);
+  const ref = (taskId: string) => doc(db, 'workspaces', s.workspace.id, 'tasks', taskId);
+
+  if (demo) {
+    if (tooClose) {
+      const list = [...col.slice(0, i), t, ...col.slice(i)];
+      list.forEach((x, k) => tasks.set(x.id, { ...tasks.get(x.id)!, order: k + 1, ...(x.id === id ? { status } : {}) }));
+    } else {
+      tasks.set(id, { ...t, status, order, updatedBy: s.uid });
+    }
+    emit();
+    return Promise.resolve();
+  }
+
+  const batch = writeBatch(db);
+  if (tooClose) {
+    const list = [...col.slice(0, i), t, ...col.slice(i)];
+    list.forEach((x, k) => {
+      if (x.id === id) batch.update(ref(id), { status, order: k + 1, updatedBy: s.uid, updatedAt: serverTimestamp() });
+      else if (x.order !== k + 1) batch.update(ref(x.id), { order: k + 1 });
+    });
+  } else {
+    batch.update(ref(id), { status, order, updatedBy: s.uid, updatedAt: serverTimestamp() });
+  }
+  return batch.commit();
+}
+
 /** Демо-режим (только dev): состояние из готовых данных, без обращений к Firestore. */
 export function startDemo(data: { workspace: Workspace; members: Member[]; tasks: Task[]; uid: string }): void {
   demo = true;

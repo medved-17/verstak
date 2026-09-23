@@ -27,7 +27,7 @@ import { viewPeople } from './views/people';
 import type { ViewResult } from './views/types';
 
 // Счётчик чтений доступен из консоли всегда, отладка правил — только при npm run dev
-Object.assign(window, { verstak: { reads: getReads, ...(import.meta.env.DEV ? { probeTasks } : {}) } });
+Object.assign(window, { verstak: { reads: getReads, ...(import.meta.env.DEV ? { probeTasks, tasks: getTasks } : {}) } });
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 
