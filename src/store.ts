@@ -8,6 +8,7 @@ import {
   onSnapshot,
   runTransaction,
   serverTimestamp,
+  writeBatch,
   type DocumentSnapshot,
   type QuerySnapshot,
   type Timestamp,
@@ -292,8 +293,99 @@ export function startLive(): void {
   );
 }
 
+// ---------- Запись задач ----------
+
+export const TITLE_MAX = 200;
+export const DESCR_MAX = 4000;
+
+/** Поля задачи, которые правит человек. */
+export interface TaskInput {
+  title: string;
+  descr: string;
+  status: string;
+  assignees: string[];
+  due: string | null;
+  priority: Priority;
+  tags: string[];
+}
+
+let demo = false;
+
+function cleanInput<T extends Partial<TaskInput>>(p: T): T {
+  const out = { ...p };
+  if (out.title !== undefined) out.title = out.title.trim().slice(0, TITLE_MAX);
+  if (out.descr !== undefined) out.descr = out.descr.slice(0, DESCR_MAX);
+  if (out.tags !== undefined) out.tags = [...new Set(out.tags.map((t) => t.trim()).filter(Boolean))];
+  return out;
+}
+
+/** Все метки для подсказок: из настроек пространства и из самих задач — без запросов. */
+export function getAllTags(): string[] {
+  const set = new Set(session?.workspace.tags ?? []);
+  tasks.forEach((t) => t.tags.forEach((g) => set.add(g)));
+  return [...set].sort((a, b) => a.localeCompare(b, 'ru'));
+}
+
+/** Порядок для новой задачи: наверх колонки, как в макете. */
+function topOrder(status: string): number {
+  let min = Infinity;
+  tasks.forEach((t) => {
+    if (t.status === status && t.order < min) min = t.order;
+  });
+  return min === Infinity ? 1 : min - 1;
+}
+
+/**
+ * Создать задачу. Одна запись. Промис не ждём в интерфейсе: локальный кэш
+ * применяет запись сразу, подписка показывает задачу до ответа сервера.
+ */
+export function createTask(input: TaskInput): Promise<string> {
+  const s = session!;
+  const data = cleanInput(input);
+  const ref = doc(collection(db, 'workspaces', s.workspace.id, 'tasks'));
+  const order = topOrder(data.status);
+  if (demo) {
+    tasks.set(ref.id, { id: ref.id, ...data, order, createdBy: s.uid, updatedBy: s.uid });
+    emit();
+    return Promise.resolve(ref.id);
+  }
+  const batch = writeBatch(db);
+  batch.set(ref, {
+    ...data,
+    order,
+    createdBy: s.uid,
+    createdAt: serverTimestamp(),
+    updatedBy: s.uid,
+    updatedAt: serverTimestamp(),
+  });
+  return batch.commit().then(() => ref.id);
+}
+
+/** Изменить поля задачи. Одна запись; меняются только переданные поля и служебные updated*. */
+export function updateTask(id: string, patch: Partial<TaskInput>): Promise<void> {
+  const s = session!;
+  const data: Partial<TaskInput> & { order?: number } = cleanInput(patch);
+  // Смена статуса из окна задачи — наверх новой колонки
+  const cur = tasks.get(id);
+  if (data.status !== undefined && cur && data.status !== cur.status) data.order = topOrder(data.status);
+  if (demo) {
+    const t = tasks.get(id);
+    if (t) tasks.set(id, { ...t, ...data, updatedBy: s.uid });
+    emit();
+    return Promise.resolve();
+  }
+  const batch = writeBatch(db);
+  batch.update(doc(db, 'workspaces', s.workspace.id, 'tasks', id), {
+    ...data,
+    updatedBy: s.uid,
+    updatedAt: serverTimestamp(),
+  });
+  return batch.commit();
+}
+
 /** Демо-режим (только dev): состояние из готовых данных, без обращений к Firestore. */
 export function startDemo(data: { workspace: Workspace; members: Member[]; tasks: Task[]; uid: string }): void {
+  demo = true;
   const me = data.members.find((m) => m.uid === data.uid)!;
   session = { uid: data.uid, workspace: data.workspace, me };
   data.members.forEach((m) => members.set(m.uid, m));

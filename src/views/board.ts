@@ -1,6 +1,6 @@
 // Доска: колонки из статусов пространства, карточки по полю order
 import { getSession, getTasks, type Task } from '../store';
-import { esc } from '../ui/dom';
+import { addButton, esc } from '../ui/dom';
 import { taskCardHtml } from '../ui/task-card';
 import type { ViewResult } from './types';
 
@@ -26,7 +26,7 @@ export function viewBoard(): ViewResult {
     })
     .join('');
   return {
-    bar: `<h3>Доска</h3>`,
+    bar: `<h3>Доска</h3><span class="sp">${addButton()}</span>`,
     body: `<div class="kanban">${cols}</div>`,
   };
 }

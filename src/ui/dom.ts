@@ -10,3 +10,8 @@ export function pl(n: number, one: string, few: string, many: string): string {
   const k = n % 10;
   return n + ' ' + (m >= 11 && m <= 14 ? many : k === 1 ? one : k >= 2 && k <= 4 ? few : many);
 }
+
+/** Кнопка «+ Задача» из шапки макета; обработчик — общий, в main.ts. */
+export function addButton(): string {
+  return '<button class="btn pri" data-act="add">+ Задача</button>';
+}

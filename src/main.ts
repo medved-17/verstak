@@ -18,6 +18,7 @@ import {
 } from './store';
 import { avatarHtml } from './ui/avatar';
 import { esc, pl } from './ui/dom';
+import { openTaskForm } from './ui/task-form';
 import { viewBoard } from './views/board';
 import { viewFeed } from './views/feed';
 import { viewList } from './views/list';
@@ -120,6 +121,17 @@ function renderShell(): void {
     if (b) go('#/' + b.dataset.v);
   });
   app.querySelector('#signout')!.addEventListener('click', () => signOut());
+
+  // Общие действия во всех видах: создать задачу, открыть задачу по клику
+  app.querySelector('.pane')!.addEventListener('click', (e) => {
+    const t = e.target as HTMLElement;
+    if (t.closest('[data-act=add]')) {
+      openTaskForm();
+      return;
+    }
+    const card = t.closest<HTMLElement>('.t-card[data-id], .row[data-id]');
+    if (card && !t.closest('.chk')) openTaskForm(card.dataset.id);
+  });
 }
 
 function renderNav(route: Route): void {
@@ -183,12 +195,15 @@ function render(): void {
   renderPane(route);
 }
 
-// Изменения стора приходят пачками — перерисовываем не чаще раза за кадр
-let frame = 0;
+// Изменения стора приходят пачками — перерисовываем один раз после пачки.
+// Микрозадача, а не requestAnimationFrame: тот не срабатывает в фоновой вкладке,
+// и экран отставал бы от данных до возвращения на вкладку.
+let pending = false;
 function scheduleRender(): void {
-  if (frame) return;
-  frame = requestAnimationFrame(() => {
-    frame = 0;
+  if (pending) return;
+  pending = true;
+  queueMicrotask(() => {
+    pending = false;
     render();
   });
 }
