@@ -1,0 +1,56 @@
+rules_version = '2';
+
+// Правила доступа Верстака, версия 1 (T-05).
+// Всё содержимое пространства доступно только его участникам — тем, у кого есть
+// workspaces/{ws}/members/{uid}. Роли пока не различаются: это задача T-14.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function wsPath(ws) {
+      return /databases/$(database)/documents/workspaces/$(ws);
+    }
+
+    function memberPath(ws, uid) {
+      return /databases/$(database)/documents/workspaces/$(ws)/members/$(uid);
+    }
+
+    function isMember(ws) {
+      return signedIn() && exists(memberPath(ws, request.auth.uid));
+    }
+
+    // Профиль: только сам человек
+    match /users/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    match /workspaces/{ws} {
+      allow read, update: if isMember(ws);
+
+      // Новое пространство создаётся одним пакетом вместе с записью владельца:
+      // после пакета создатель должен оказаться в members с ролью owner.
+      allow create: if signedIn()
+        && getAfter(memberPath(ws, request.auth.uid)).data.role == 'owner';
+
+      allow delete: if false;
+
+      match /members/{uid} {
+        // Самозапись владельцем — только при создании нового пространства,
+        // в чужое существующее пространство так попасть нельзя.
+        allow create: if signedIn()
+          && uid == request.auth.uid
+          && request.resource.data.role == 'owner'
+          && !exists(wsPath(ws))
+          && existsAfter(wsPath(ws));
+      }
+
+      // Задачи, комментарии, виды, лента, участники — чтение и запись только участникам
+      match /{path=**} {
+        allow read, write: if isMember(ws);
+      }
+    }
+  }
+}
