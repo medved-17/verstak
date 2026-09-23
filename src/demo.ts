@@ -1,6 +1,6 @@
 // Демо-данные для проверки вёрстки без входа: только в режиме разработки,
 // открывается по адресу localhost:5173/?demo. В сборку для Pages не попадает.
-import { DEFAULT_STATUSES, type Member, type Task } from './store';
+import { DEFAULT_STATUSES, type Member, type SavedView, type Task } from './store';
 
 function day(offset: number): string {
   const d = new Date();
@@ -52,3 +52,10 @@ export const demoWorkspace = {
   statuses: DEFAULT_STATUSES,
   tags: ['План', 'Отчёт', 'Прототип', 'Документация', 'Импорт', 'Чистка', 'Передача', 'Верстак', 'Проверка'],
 };
+
+// Виды из макета
+export const demoViews: SavedView[] = [
+  { id: 'v2', name: 'Просроченные', icon: '!', filter: { overdue: true }, group: 'none', sort: 'due' },
+  { id: 'v3', name: 'Без исполнителя', icon: '○', filter: { unassigned: true }, group: 'none', sort: 'order' },
+  { id: 'v4', name: 'Метка «План»', icon: '#', filter: { tags: ['План'] }, group: 'status', sort: 'due' },
+];

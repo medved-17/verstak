@@ -187,3 +187,4 @@ dialog.modal.modal-wide{width:min(720px,calc(100vw - 32px))}
 .fitem .tm{display:block}
 .fitem[data-task]{cursor:pointer}
 .fitem[data-task]:hover b{color:var(--accent)}
+.fbar-sp{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}

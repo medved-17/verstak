@@ -11,6 +11,7 @@ import {
   getWrites,
   getSession,
   getTasks,
+  getViews,
   isDone,
   isLoaded,
   onChange,
@@ -30,7 +31,7 @@ import { openTaskForm } from './ui/task-form';
 import { toast, writeErrorText } from './ui/toast';
 import { viewBoard } from './views/board';
 import { viewFeed } from './views/feed';
-import { viewList } from './views/list';
+import { ALL, countForView, viewList } from './views/list';
 import { viewMy } from './views/my';
 import { viewPeople } from './views/people';
 import type { ViewResult } from './views/types';
@@ -161,9 +162,7 @@ function renderShell(): void {
         </div>
         <div>
           <div class="sgrp">Виды</div>
-          <div class="nav tree" id="tree">
-            <button data-list="all" aria-current="false"><span class="ic">▦</span>Все задачи<span class="cnt" id="c-all"></span></button>
-          </div>
+          <div class="nav tree" id="tree"></div>
         </div>
         <div class="foot"><span id="me-av"></span><span class="nm">${esc(s.me.name)}</span><button class="btn" id="signout">Выйти</button></div>
       </aside>
@@ -212,17 +211,22 @@ function renderNav(route: Route): void {
   app.querySelectorAll<HTMLButtonElement>('#nav button').forEach((b) =>
     b.setAttribute('aria-current', String(b.dataset.v === route.name)),
   );
-  app.querySelectorAll<HTMLButtonElement>('#tree button').forEach((b) =>
-    b.setAttribute('aria-current', String(route.name === 'list' && b.dataset.list === route.arg)),
-  );
+  // Виды: «Все задачи» и сохранённые — с числом задач, как в макете
   const loaded = isLoaded();
+  const cur = (id: string) => String(route.name === 'list' && route.arg === id);
+  app.querySelector('#tree')!.innerHTML = [
+    `<button data-list="${ALL}" aria-current="${cur(ALL)}"><span class="ic">▦</span>Все задачи<span class="cnt">${loaded ? tasks.length : ''}</span></button>`,
+    ...getViews().map(
+      (v) =>
+        `<button data-list="${esc(v.id)}" aria-current="${cur(v.id)}"><span class="ic">${esc(v.icon)}</span>${esc(v.name)}<span class="cnt">${loaded ? countForView(v) : ''}</span></button>`,
+    ),
+  ].join('');
   const set = (id: string, text: string) => {
     const el = app.querySelector('#' + id);
     if (el) el.textContent = loaded ? text : '';
   };
   set('c-my', String(tasks.filter((t) => t.assignees.includes(s.uid) && !isDone(t)).length));
   set('c-board', String(tasks.length));
-  set('c-all', String(tasks.length));
   set('c-people', String(nMembers));
   set('ws-sub', pl(nMembers, 'участник', 'участника', 'участников'));
   app.querySelector('#me-av')!.innerHTML = avatarHtml(s.uid);
@@ -351,7 +355,7 @@ async function startDemoMode(): Promise<void> {
   // ?demo=commenter — посмотреть интерфейс под другой ролью
   const role = new URLSearchParams(location.search).get('demo') as Role | '';
   const members = d.demoMembers.map((m) => (m.uid === d.DEMO_UID && role ? { ...m, role } : m));
-  startDemo({ workspace: d.demoWorkspace, members, tasks: d.demoTasks, uid: d.DEMO_UID });
+  startDemo({ workspace: d.demoWorkspace, members, tasks: d.demoTasks, uid: d.DEMO_UID, views: d.demoViews });
   renderShell();
   render();
 }

@@ -248,6 +248,100 @@ export async function probeTasks(wsId: string): Promise<string> {
   }
 }
 
+// ---------- Сохранённые виды ----------
+
+/** Фильтр вида — как в модели данных; priority добавлен, потому что фильтр по приоритету есть в T-11. */
+export interface ViewFilter {
+  status?: string[];
+  assignees?: string[];
+  tags?: string[];
+  priority?: number[];
+  overdue?: boolean;
+  unassigned?: boolean;
+}
+
+export interface SavedView {
+  id: string;
+  name: string;
+  icon: string;
+  filter: ViewFilter;
+  group: 'status' | 'assignee' | 'none';
+  sort: 'order' | 'due' | 'priority';
+}
+
+export type ViewInput = Omit<SavedView, 'id'>;
+
+const views = new Map<string, SavedView>();
+
+export function getViews(): SavedView[] {
+  return [...views.values()].sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+}
+
+export function getView(id: string): SavedView | undefined {
+  return views.get(id);
+}
+
+function viewFrom(id: string, d: Record<string, unknown>): SavedView {
+  const f = (d.filter ?? {}) as ViewFilter;
+  return {
+    id,
+    name: String(d.name ?? 'Без названия'),
+    icon: String(d.icon ?? '▦'),
+    filter: f,
+    group: d.group === 'status' || d.group === 'assignee' ? d.group : 'none',
+    sort: d.sort === 'due' || d.sort === 'priority' ? d.sort : 'order',
+  };
+}
+
+/** Убрать пустые поля фильтра — в документе остаётся только то, что задано. */
+function cleanFilter(f: ViewFilter): ViewFilter {
+  const out: ViewFilter = {};
+  (Object.keys(f) as (keyof ViewFilter)[]).forEach((k) => {
+    const v = f[k];
+    if (Array.isArray(v) ? v.length : v) (out as Record<string, unknown>)[k] = v;
+  });
+  return out;
+}
+
+export function createView(v: ViewInput): Promise<string> {
+  const s = session!;
+  const ref = doc(collection(db, 'workspaces', s.workspace.id, 'views'));
+  const data = { ...v, name: v.name.trim().slice(0, 60), filter: cleanFilter(v.filter) };
+  countWrites(1, 'новый вид');
+  if (demo) {
+    views.set(ref.id, { id: ref.id, ...data });
+    emit();
+    return Promise.resolve(ref.id);
+  }
+  return writeBatch(db).set(ref, data).commit().then(() => ref.id);
+}
+
+export function updateView(id: string, v: Partial<ViewInput>): Promise<void> {
+  const s = session!;
+  const data: Partial<ViewInput> = { ...v };
+  if (data.filter) data.filter = cleanFilter(data.filter);
+  countWrites(1, 'правка вида');
+  if (demo) {
+    const cur = views.get(id);
+    if (cur) views.set(id, { ...cur, ...data });
+    emit();
+    return Promise.resolve();
+  }
+  // Фильтр заменяется целиком, а не сливается с прежним
+  return writeBatch(db).set(doc(db, 'workspaces', s.workspace.id, 'views', id), data, { merge: true }).commit();
+}
+
+export function deleteView(id: string): Promise<void> {
+  const s = session!;
+  countWrites(1, 'удаление вида');
+  if (demo) {
+    views.delete(id);
+    emit();
+    return Promise.resolve();
+  }
+  return writeBatch(db).delete(doc(db, 'workspaces', s.workspace.id, 'views', id)).commit();
+}
+
 // ---------- Живое состояние пространства ----------
 // Одна подписка на все задачи и одна на участников. Живут, пока открыта сессия;
 // переключение между видами новых запросов не создаёт — вьюхи читают эти Map.
@@ -353,6 +447,19 @@ export function startLive(): void {
         const me = session && members.get(session.uid);
         if (session && me) session.me = me;
         loaded.members = true;
+        emit();
+      },
+      onLiveError,
+    ),
+    // Виды — несколько маленьких документов; подписка, чтобы новый вид сразу появлялся у всех
+    onSnapshot(
+      collection(db, 'workspaces', wsId, 'views'),
+      (snap) => {
+        countQuery(snap, 'виды');
+        snap.docChanges().forEach((ch) => {
+          if (ch.type === 'removed') views.delete(ch.doc.id);
+          else views.set(ch.doc.id, viewFrom(ch.doc.id, ch.doc.data()));
+        });
         emit();
       },
       onLiveError,
@@ -819,9 +926,11 @@ export function startDemo(data: {
   tasks: Task[];
   uid: string;
   activity?: ActivityEvent[];
+  views?: SavedView[];
 }): void {
   demo = true;
   demoActivity = data.activity ?? [];
+  data.views?.forEach((v) => views.set(v.id, v));
   const me = data.members.find((m) => m.uid === data.uid)!;
   session = { uid: data.uid, workspace: data.workspace, me };
   data.members.forEach((m) => members.set(m.uid, m));
@@ -836,6 +945,7 @@ export function stopLive(): void {
   unsubs = [];
   tasks.clear();
   members.clear();
+  views.clear();
   loaded = { tasks: false, members: false };
   liveError = null;
   feedUnsub?.();
