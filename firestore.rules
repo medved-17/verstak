@@ -1,11 +1,20 @@
 rules_version = '2';
 
-// Правила доступа Верстака.
-// T-05: всё содержимое пространства доступно только его участникам — тем, у кого есть
-// workspaces/{ws}/members/{uid}. T-13: вход по приглашению. Роли внутри пространства
-// пока не различаются: это задача T-14.
+// Правила доступа Верстака — единственное место проверки прав, интерфейс лишь прячет кнопки.
+//
+// Роли (раздел 5 ТЗ):
+//   owner     — задачи: всё; приглашает, меняет роли, удаляет пространство
+//   admin     — задачи: всё; приглашает и меняет роли, кроме владельца
+//   member    — создаёт и правит любые задачи
+//   commenter — меняет статус (и порядок) только своих задач, пишет комментарии
+//   viewer    — только смотрит
+//
+// Роль читается из members/{uid} через get(): одно чтение на запрос. Перевод на
+// custom claims — задача T-19.
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // ---------- общие функции ----------
 
     function signedIn() {
       return request.auth != null;
@@ -19,31 +28,62 @@ service cloud.firestore {
       return /databases/$(database)/documents/workspaces/$(ws)/members/$(uid);
     }
 
-    function isMember(ws) {
-      return signedIn() && exists(memberPath(ws, request.auth.uid));
-    }
-
     function invitePath(token) {
       return /databases/$(database)/documents/invites/$(token);
     }
 
+    function isMember(ws) {
+      return signedIn() && exists(memberPath(ws, request.auth.uid));
+    }
+
+    function role(ws) {
+      return get(memberPath(ws, request.auth.uid)).data.role;
+    }
+
     function roleIn(ws, roles) {
-      return signedIn() && get(memberPath(ws, request.auth.uid)).data.role in roles;
+      return isMember(ws) && role(ws) in roles;
+    }
+
+    function isAdmin(ws) {
+      return roleIn(ws, ['owner', 'admin']);
+    }
+
+    function isWriter(ws) {
+      return roleIn(ws, ['owner', 'admin', 'member']);
+    }
+
+    function changed() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    // Поля задачи в допустимых границах
+    function validTask(d) {
+      return d.keys().hasOnly(['title', 'descr', 'status', 'assignees', 'due', 'priority', 'tags',
+                               'order', 'createdBy', 'createdAt', 'updatedBy', 'updatedAt'])
+        && d.title is string && d.title.size() > 0 && d.title.size() <= 200
+        && d.descr is string && d.descr.size() <= 4000
+        && d.status is string
+        && d.assignees is list && d.assignees.size() <= 50
+        && (d.due == null || (d.due is string && d.due.size() == 10))
+        && d.priority in [1, 2, 3]
+        && d.tags is list && d.tags.size() <= 20
+        && d.order is number;
     }
 
     // Приглашение годно: для этого пространства и роли, не просрочено, ещё не использовано,
     // и после пакета помечено использованным текущим человеком
-    function inviteValid(ws, token, role) {
+    function inviteValid(ws, token, r) {
       let inv = get(invitePath(token)).data;
       return inv.ws == ws
-        && inv.role == role
+        && inv.role == r
         && !('usedBy' in inv)
         && inv.expiresAt > request.time
         && getAfter(invitePath(token)).data.usedBy == request.auth.uid;
     }
 
-    // Приглашения (T-13). Токен — случайный id документа: кто знает ссылку, тот может
-    // прочитать приглашение; перечислять приглашения нельзя.
+    // ---------- приглашения ----------
+    // Токен — случайный id документа: кто знает ссылку, тот может прочитать приглашение;
+    // перечислять приглашения нельзя.
     match /invites/{token} {
       allow get: if signedIn();
       allow list: if false;
@@ -52,7 +92,7 @@ service cloud.firestore {
       allow create: if signedIn()
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.ws is string
-        && roleIn(request.resource.data.ws, ['owner', 'admin'])
+        && isAdmin(request.resource.data.ws)
         && request.resource.data.role in ['admin', 'member', 'commenter', 'viewer']
         && request.resource.data.expiresAt is timestamp
         && request.resource.data.expiresAt <= request.time + duration.value(8, 'd')
@@ -62,48 +102,116 @@ service cloud.firestore {
       allow update: if signedIn()
         && !('usedBy' in resource.data)
         && resource.data.expiresAt > request.time
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usedBy'])
+        && changed().hasOnly(['usedBy'])
         && request.resource.data.usedBy == request.auth.uid
         && getAfter(memberPath(resource.data.ws, request.auth.uid)).data.invite == token;
 
       allow delete: if false;
     }
 
-    // Профиль: только сам человек
+    // ---------- профиль: только сам человек ----------
     match /users/{uid} {
       allow read, write: if signedIn() && request.auth.uid == uid;
     }
 
+    // ---------- пространство ----------
     match /workspaces/{ws} {
-      allow read, update: if isMember(ws);
+      allow read: if isMember(ws);
 
-      // Новое пространство создаётся одним пакетом вместе с записью владельца:
-      // после пакета создатель должен оказаться в members с ролью owner.
+      // Новое пространство создаётся одним пакетом вместе с записью владельца
       allow create: if signedIn()
         && getAfter(memberPath(ws, request.auth.uid)).data.role == 'owner';
 
-      allow delete: if false;
+      // Название, статусы, метки — владелец и администратор
+      allow update: if isAdmin(ws);
+      allow delete: if roleIn(ws, ['owner']);
 
+      // ---------- участники ----------
       match /members/{uid} {
-        // Самозапись владельцем — только при создании нового пространства,
-        // в чужое существующее пространство так попасть нельзя.
+        allow read: if isMember(ws);
+
+        // Владелец нового пространства — только при его создании
         allow create: if signedIn()
           && uid == request.auth.uid
           && request.resource.data.role == 'owner'
           && !exists(wsPath(ws))
           && existsAfter(wsPath(ws));
 
-        // Вход по приглашению (T-13): роль и пространство — из приглашения,
-        // приглашение в этом же пакете помечается использованным этим человеком.
+        // Вход по приглашению: роль и пространство — из приглашения
         allow create: if signedIn()
           && uid == request.auth.uid
           && request.resource.data.invite is string
           && inviteValid(ws, request.resource.data.invite, request.resource.data.role);
+
+        // Смена роли: владелец и администратор; роль владельца не меняется и не выдаётся;
+        // своя роль не меняется (нельзя разжаловать себя и остаться без администратора)
+        allow update: if isAdmin(ws)
+          && uid != request.auth.uid
+          && resource.data.role != 'owner'
+          && request.resource.data.role in ['admin', 'member', 'commenter', 'viewer']
+          && changed().hasOnly(['role']);
+
+        // Своё имя и цвет аватара человек может поправить сам, роль — нет
+        allow update: if signedIn()
+          && uid == request.auth.uid
+          && changed().hasOnly(['name', 'email', 'color']);
+
+        // Исключить участника: владелец и администратор, владельца — нельзя
+        allow delete: if isAdmin(ws) && resource.data.role != 'owner';
       }
 
-      // Задачи, комментарии, виды, лента, участники — чтение и запись только участникам
-      match /{path=**} {
-        allow read, write: if isMember(ws);
+      // ---------- задачи ----------
+      match /tasks/{taskId} {
+        allow read: if isMember(ws);
+
+        allow create: if isWriter(ws)
+          && validTask(request.resource.data)
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.updatedBy == request.auth.uid;
+
+        // Участник и выше правят любые задачи; createdBy и createdAt не меняются;
+        // updatedBy — пишущий, кроме перенумерации колонки (меняется только order)
+        allow update: if isWriter(ws)
+          && validTask(request.resource.data)
+          && !changed().hasAny(['createdBy', 'createdAt'])
+          && (request.resource.data.updatedBy == request.auth.uid || changed().hasOnly(['order']));
+
+        // Комментатор — статус и порядок только своих задач
+        allow update: if roleIn(ws, ['commenter'])
+          && request.auth.uid in resource.data.assignees
+          && changed().hasOnly(['status', 'order', 'updatedAt', 'updatedBy'])
+          && request.resource.data.status is string
+          && request.resource.data.order is number
+          && request.resource.data.updatedBy == request.auth.uid;
+
+        allow delete: if isAdmin(ws);
+
+        // Комментарии: пишут все, кроме читателя; правка запрещена, удаляет автор или администратор
+        match /comments/{commentId} {
+          allow read: if isMember(ws);
+          allow create: if roleIn(ws, ['owner', 'admin', 'member', 'commenter'])
+            && request.resource.data.author == request.auth.uid
+            && request.resource.data.text is string
+            && request.resource.data.text.size() > 0
+            && request.resource.data.text.size() <= 4000;
+          allow update: if false;
+          allow delete: if isMember(ws)
+            && (resource.data.author == request.auth.uid || isAdmin(ws));
+        }
+      }
+
+      // ---------- сохранённые виды ----------
+      match /views/{viewId} {
+        allow read: if isMember(ws);
+        allow write: if isWriter(ws);
+      }
+
+      // ---------- лента: только добавление, от своего имени ----------
+      match /activity/{eventId} {
+        allow read: if isMember(ws);
+        allow create: if roleIn(ws, ['owner', 'admin', 'member', 'commenter'])
+          && request.resource.data.actor == request.auth.uid;
+        allow update, delete: if false;
       }
     }
   }
