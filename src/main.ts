@@ -200,6 +200,8 @@ function renderShell(): void {
     }
     const card = t.closest<HTMLElement>('.t-card[data-id], .row[data-id]');
     if (card) openTaskDetail(card.dataset.id!);
+    const ev = t.closest<HTMLElement>('.fitem[data-task]');
+    if (ev) openTaskDetail(ev.dataset.task!);
   });
 }
 

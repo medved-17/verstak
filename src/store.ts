@@ -402,6 +402,47 @@ function topOrder(status: string): number {
   return min === Infinity ? 1 : min - 1;
 }
 
+// ---------- События ленты: пишутся в том же пакете, что и изменение задачи ----------
+
+type NewEvent = { verb: 'created' | 'status' | 'assigned' | 'due'; task: { id: string; title: string }; from?: string; to?: string };
+
+/** Какие события порождает правка задачи: статус, исполнители, срок. */
+function eventsFor(before: Task, after: Partial<TaskInput>): NewEvent[] {
+  const out: NewEvent[] = [];
+  const task = { id: before.id, title: after.title ?? before.title };
+  if (after.status !== undefined && after.status !== before.status) {
+    out.push({ verb: 'status', task, from: before.status, to: after.status });
+  }
+  if (after.assignees !== undefined && after.assignees.join(',') !== before.assignees.join(',')) {
+    out.push({ verb: 'assigned', task, from: before.assignees.join(','), to: after.assignees.join(',') });
+  }
+  if (after.due !== undefined && (after.due ?? '') !== (before.due ?? '')) {
+    out.push({ verb: 'due', task, from: before.due ?? '', to: after.due ?? '' });
+  }
+  return out;
+}
+
+/** Добавить события в пакет (или в демо-ленту). Возвращает число событий. */
+function addEvents(batch: ReturnType<typeof writeBatch> | null, events: NewEvent[]): number {
+  const s = session!;
+  events.forEach((e) => {
+    const ref = doc(collection(db, 'workspaces', s.workspace.id, 'activity'));
+    const data: Record<string, unknown> = { actor: s.uid, verb: e.verb, taskId: e.task.id, taskTitle: e.task.title };
+    if (e.from !== undefined) data.from = e.from;
+    if (e.to !== undefined) data.to = e.to;
+    if (batch) {
+      batch.set(ref, { ...data, at: serverTimestamp() });
+    } else {
+      const ev = eventFrom(ref.id, data);
+      ev.at = new Date();
+      demoActivity.unshift(ev);
+      feed.unshift(ev);
+      feed.length = Math.min(feed.length, FEED_LIMIT);
+    }
+  });
+  return events.length;
+}
+
 /**
  * Создать задачу. Одна запись. Промис не ждём в интерфейсе: локальный кэш
  * применяет запись сразу, подписка показывает задачу до ответа сервера.
@@ -411,13 +452,18 @@ export function createTask(input: TaskInput): Promise<string> {
   const data = cleanInput(input);
   const ref = doc(collection(db, 'workspaces', s.workspace.id, 'tasks'));
   const order = topOrder(data.status);
-  countWrites(1, 'новая задача');
+  const created: NewEvent[] = [{ verb: 'created', task: { id: ref.id, title: data.title } }];
+  // Назначение при создании — событие, только если задачу поставили не только на себя
+  if (data.assignees.some((u) => u !== s.uid)) created.push({ verb: 'assigned', task: { id: ref.id, title: data.title }, from: '', to: data.assignees.join(',') });
+  countWrites(1 + created.length, 'новая задача + лента');
   if (demo) {
     tasks.set(ref.id, { id: ref.id, ...data, order, createdBy: s.uid, updatedBy: s.uid });
+    addEvents(null, created);
     emit();
     return Promise.resolve(ref.id);
   }
   const batch = writeBatch(db);
+  addEvents(batch, created);
   batch.set(ref, {
     ...data,
     order,
@@ -436,14 +482,17 @@ export function updateTask(id: string, patch: Partial<TaskInput>): Promise<void>
   // Смена статуса из окна задачи — наверх новой колонки
   const cur = tasks.get(id);
   if (data.status !== undefined && cur && data.status !== cur.status) data.order = topOrder(data.status);
-  countWrites(1, 'правка задачи: ' + Object.keys(data).join(', '));
+  const events = cur ? eventsFor(cur, data) : [];
+  countWrites(1 + events.length, 'правка задачи: ' + Object.keys(data).join(', ') + (events.length ? ' + лента' : ''));
   if (demo) {
     const t = tasks.get(id);
     if (t) tasks.set(id, { ...t, ...data, updatedBy: s.uid });
+    addEvents(null, events);
     emit();
     return Promise.resolve();
   }
   const batch = writeBatch(db);
+  addEvents(batch, events);
   batch.update(doc(db, 'workspaces', s.workspace.id, 'tasks', id), {
     ...data,
     updatedBy: s.uid,
@@ -481,9 +530,11 @@ export function moveTask(id: string, status: string, index: number): Promise<voi
 
   const tooClose = (prev && order - prev.order < 1e-6) || (next && next.order - order < 1e-6);
   const ref = (taskId: string) => doc(db, 'workspaces', s.workspace.id, 'tasks', taskId);
-  countWrites(tooClose ? col.length + 1 : 1, tooClose ? 'перенумерация колонки' : 'перенос карточки');
+  const events = eventsFor(t, { status });
+  countWrites((tooClose ? col.length + 1 : 1) + events.length, (tooClose ? 'перенумерация колонки' : 'перенос карточки') + (events.length ? ' + лента' : ''));
 
   if (demo) {
+    addEvents(null, events);
     if (tooClose) {
       const list = [...col.slice(0, i), t, ...col.slice(i)];
       list.forEach((x, k) => tasks.set(x.id, { ...tasks.get(x.id)!, order: k + 1, ...(x.id === id ? { status } : {}) }));
@@ -495,6 +546,7 @@ export function moveTask(id: string, status: string, index: number): Promise<voi
   }
 
   const batch = writeBatch(db);
+  addEvents(batch, events);
   if (tooClose) {
     const list = [...col.slice(0, i), t, ...col.slice(i)];
     list.forEach((x, k) => {
@@ -647,6 +699,49 @@ export async function loadTaskHistory(taskId: string): Promise<ActivityEvent[]> 
   return list.sort((a, b) => (b.at?.getTime() ?? Date.now()) - (a.at?.getTime() ?? Date.now()));
 }
 
+// ---------- Лента ----------
+// Последние 50 событий. Подписка открывается при первом заходе в ленту и живёт до выхода:
+// повторные заходы новых запросов не делают, новые события приходят сами.
+
+export const FEED_LIMIT = 50;
+let feed: ActivityEvent[] = [];
+let feedState: 'idle' | 'loading' | 'ready' | 'error' = 'idle';
+let feedUnsub: Unsubscribe | null = null;
+
+export function getFeed(): ActivityEvent[] {
+  return feed;
+}
+
+export function getFeedState(): typeof feedState {
+  return feedState;
+}
+
+export function startFeed(): void {
+  if (feedState !== 'idle' || !session) return;
+  if (demo) {
+    feed = [...demoActivity].sort((a, b) => (b.at?.getTime() ?? 0) - (a.at?.getTime() ?? 0)).slice(0, FEED_LIMIT);
+    feedState = 'ready';
+    return;
+  }
+  feedState = 'loading';
+  let first = true;
+  feedUnsub = onSnapshot(
+    query(collection(db, 'workspaces', session.workspace.id, 'activity'), orderBy('at', 'desc'), limit(FEED_LIMIT)),
+    (snap) => {
+      if (!snap.metadata.fromCache) countReads(first ? Math.max(1, snap.docChanges().length) : snap.docChanges().length, 'лента');
+      first = false;
+      feed = snap.docs.map((d) => eventFrom(d.id, d.data({ serverTimestamps: 'estimate' })));
+      feedState = 'ready';
+      emit();
+    },
+    (e) => {
+      console.error('Лента не загрузилась', e);
+      feedState = 'error';
+      emit();
+    },
+  );
+}
+
 // ---------- Комментарии ----------
 
 export const COMMENT_MAX = 4000;
@@ -743,5 +838,9 @@ export function stopLive(): void {
   members.clear();
   loaded = { tasks: false, members: false };
   liveError = null;
+  feedUnsub?.();
+  feedUnsub = null;
+  feed = [];
+  feedState = 'idle';
   session = null;
 }

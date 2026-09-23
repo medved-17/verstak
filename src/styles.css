@@ -185,3 +185,5 @@ dialog.modal.modal-wide{width:min(720px,calc(100vw - 32px))}
 .td-text{white-space:pre-wrap;overflow-wrap:anywhere}
 /* В макете у времени margin-top, но span строчный и время прилипает к тексту — ставим отдельной строкой */
 .fitem .tm{display:block}
+.fitem[data-task]{cursor:pointer}
+.fitem[data-task]:hover b{color:var(--accent)}
