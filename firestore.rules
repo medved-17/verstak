@@ -1,8 +1,9 @@
 rules_version = '2';
 
-// Правила доступа Верстака, версия 1 (T-05).
-// Всё содержимое пространства доступно только его участникам — тем, у кого есть
-// workspaces/{ws}/members/{uid}. Роли пока не различаются: это задача T-14.
+// Правила доступа Верстака.
+// T-05: всё содержимое пространства доступно только его участникам — тем, у кого есть
+// workspaces/{ws}/members/{uid}. T-13: вход по приглашению. Роли внутри пространства
+// пока не различаются: это задача T-14.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -20,6 +21,52 @@ service cloud.firestore {
 
     function isMember(ws) {
       return signedIn() && exists(memberPath(ws, request.auth.uid));
+    }
+
+    function invitePath(token) {
+      return /databases/$(database)/documents/invites/$(token);
+    }
+
+    function roleIn(ws, roles) {
+      return signedIn() && get(memberPath(ws, request.auth.uid)).data.role in roles;
+    }
+
+    // Приглашение годно: для этого пространства и роли, не просрочено, ещё не использовано,
+    // и после пакета помечено использованным текущим человеком
+    function inviteValid(ws, token, role) {
+      let inv = get(invitePath(token)).data;
+      return inv.ws == ws
+        && inv.role == role
+        && !('usedBy' in inv)
+        && inv.expiresAt > request.time
+        && getAfter(invitePath(token)).data.usedBy == request.auth.uid;
+    }
+
+    // Приглашения (T-13). Токен — случайный id документа: кто знает ссылку, тот может
+    // прочитать приглашение; перечислять приглашения нельзя.
+    match /invites/{token} {
+      allow get: if signedIn();
+      allow list: if false;
+
+      // Создают владелец и администратор, роль — любая кроме владельца, срок — не больше недели
+      allow create: if signedIn()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.ws is string
+        && roleIn(request.resource.data.ws, ['owner', 'admin'])
+        && request.resource.data.role in ['admin', 'member', 'commenter', 'viewer']
+        && request.resource.data.expiresAt is timestamp
+        && request.resource.data.expiresAt <= request.time + duration.value(8, 'd')
+        && !('usedBy' in request.resource.data);
+
+      // Использовать можно один раз и только вместе с созданием своей записи участника
+      allow update: if signedIn()
+        && !('usedBy' in resource.data)
+        && resource.data.expiresAt > request.time
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usedBy'])
+        && request.resource.data.usedBy == request.auth.uid
+        && getAfter(memberPath(resource.data.ws, request.auth.uid)).data.invite == token;
+
+      allow delete: if false;
     }
 
     // Профиль: только сам человек
@@ -45,6 +92,13 @@ service cloud.firestore {
           && request.resource.data.role == 'owner'
           && !exists(wsPath(ws))
           && existsAfter(wsPath(ws));
+
+        // Вход по приглашению (T-13): роль и пространство — из приглашения,
+        // приглашение в этом же пакете помечается использованным этим человеком.
+        allow create: if signedIn()
+          && uid == request.auth.uid
+          && request.resource.data.invite is string
+          && inviteValid(ws, request.resource.data.invite, request.resource.data.role);
       }
 
       // Задачи, комментарии, виды, лента, участники — чтение и запись только участникам
