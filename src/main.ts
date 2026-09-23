@@ -167,6 +167,7 @@ function renderShell(): void {
         <div class="foot"><span id="me-av"></span><span class="nm">${esc(s.me.name)}</span><button class="btn" id="signout">Выйти</button></div>
       </aside>
       <div class="pane">
+        <nav class="mnav" id="mnav" aria-label="Разделы"></nav>
         <div class="bar" id="bar"></div>
         <div class="body" id="body"></div>
       </div>
@@ -175,10 +176,17 @@ function renderShell(): void {
     const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-v]');
     if (b) go('#/' + b.dataset.v);
   });
-  app.querySelector('#tree')!.addEventListener('click', (e) => {
-    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-list]');
-    if (b) go('#/list/' + encodeURIComponent(b.dataset.list!));
-  });
+  // Боковая панель и мобильная полоса разделов ведут себя одинаково
+  const onNavClick = (e: Event) => {
+    const t = e.target as HTMLElement;
+    const v = t.closest<HTMLButtonElement>('button[data-v]');
+    if (v) go('#/' + v.dataset.v);
+    const l = t.closest<HTMLButtonElement>('button[data-list]');
+    if (l) go('#/list/' + encodeURIComponent(l.dataset.list!));
+    if (t.closest('[data-act=signout]')) void signOut();
+  };
+  app.querySelector('#tree')!.addEventListener('click', onNavClick);
+  app.querySelector('#mnav')!.addEventListener('click', onNavClick);
   app.querySelector('#signout')!.addEventListener('click', () => signOut());
 
   // Общие действия во всех видах: создать задачу, открыть задачу по клику
@@ -225,6 +233,20 @@ function renderNav(route: Route): void {
     const el = app.querySelector('#' + id);
     if (el) el.textContent = loaded ? text : '';
   };
+  // Полоса разделов для телефона: разделы, виды, выход
+  const mnav = app.querySelector<HTMLElement>('#mnav')!;
+  const scroll = mnav.scrollLeft;
+  mnav.innerHTML = [
+    `<span class="ws"><span class="av">${esc(initials(s.workspace.name))}</span></span>`,
+    ...NAV.map((n) => `<button data-v="${n.v}" aria-current="${n.v === route.name}">${n.label}</button>`),
+    '<span class="sep"></span>',
+    `<button data-list="${ALL}" aria-current="${cur(ALL)}">Все задачи</button>`,
+    ...getViews().map((v) => `<button data-list="${esc(v.id)}" aria-current="${cur(v.id)}">${esc(v.icon)} ${esc(v.name)}</button>`),
+    '<span class="sep"></span>',
+    '<button data-act="signout">Выйти</button>',
+  ].join('');
+  mnav.scrollLeft = scroll;
+
   set('c-my', String(tasks.filter((t) => t.assignees.includes(s.uid) && !isDone(t)).length));
   set('c-board', String(tasks.length));
   set('c-people', String(nMembers));
@@ -311,6 +333,79 @@ window.addEventListener('hashchange', () => {
     return;
   }
   render();
+});
+
+// ---------- Тема ----------
+// Как в макете: по умолчанию — как в системе, кнопка переключает светлую и тёмную.
+// Выбор запоминается в браузере (только удобство: без хранилища всё равно работает).
+
+const THEME_KEY = 'verstak.theme';
+const themeBtn = document.createElement('button');
+themeBtn.className = 'themebtn';
+themeBtn.type = 'button';
+
+function isDark(): boolean {
+  const t = document.documentElement.getAttribute('data-theme');
+  return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
+function syncThemeBtn(): void {
+  themeBtn.textContent = isDark() ? 'Светлая тема' : 'Тёмная тема';
+}
+
+try {
+  const saved = localStorage.getItem(THEME_KEY);
+  if (saved === 'dark' || saved === 'light') document.documentElement.setAttribute('data-theme', saved);
+} catch {
+  // хранилище недоступно — тема как в системе
+}
+themeBtn.addEventListener('click', () => {
+  const next = isDark() ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try {
+    localStorage.setItem(THEME_KEY, next);
+  } catch {
+    // не запомним — не страшно
+  }
+  syncThemeBtn();
+});
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', syncThemeBtn);
+syncThemeBtn();
+document.body.append(themeBtn);
+
+// ---------- Нет связи ----------
+// Изменения при этом не теряются: локальный кэш Firestore отправит их, когда связь вернётся.
+
+const offline = document.createElement('div');
+offline.className = 'offline';
+offline.setAttribute('role', 'status');
+offline.textContent = 'Нет связи — изменения сохранятся, когда она появится';
+function syncOnline(): void {
+  offline.hidden = navigator.onLine;
+}
+window.addEventListener('online', syncOnline);
+window.addEventListener('offline', syncOnline);
+syncOnline();
+document.body.append(offline);
+
+// ---------- Горячие клавиши: N — новая задача, / — поиск ----------
+// По физической клавише (code), чтобы работало и в русской раскладке.
+
+document.addEventListener('keydown', (e) => {
+  if (!getSession() || e.ctrlKey || e.metaKey || e.altKey) return;
+  const t = e.target as HTMLElement;
+  if (t.closest('input, textarea, select, [contenteditable]') || document.querySelector('dialog[open]')) return;
+  if (e.code === 'KeyN') {
+    e.preventDefault();
+    openTaskForm();
+  } else if (e.code === 'Slash') {
+    e.preventDefault();
+    if (parseRoute().name !== 'list') {
+      go('#/list/' + ALL);
+      render(); // hashchange придёт позже — рисуем сразу, чтобы было куда ставить фокус
+    }
+    app.querySelector<HTMLInputElement>('#f-q')?.focus();
+  }
 });
 
 // ---------- Вход и выход ----------

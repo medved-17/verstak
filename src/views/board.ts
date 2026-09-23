@@ -22,7 +22,7 @@ export function viewBoard(): ViewResult {
       const list = columnTasks(c.key);
       return `<div class="col" data-col="${esc(c.key)}">
         <div class="ch"><span class="dot" style="background:${esc(c.color)}"></span>${esc(c.name)}<span class="n">${list.length}</span></div>
-        ${list.map(taskCardHtml).join('')}
+        ${list.length ? list.map(taskCardHtml).join('') : '<div class="col-empty">Пусто</div>'}
       </div>`;
     })
     .join('');

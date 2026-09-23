@@ -1,5 +1,5 @@
 // «Мои задачи»: мои задачи по срокам — просрочено, сегодня и завтра, дальше, сделано
-import { getSession, getTasks, isDone, type Task } from '../store';
+import { can, getSession, getTasks, isDone, type Task } from '../store';
 import { addButton, esc } from '../ui/dom';
 import { daysFromToday } from '../ui/pills';
 import { taskRowHtml } from '../ui/task-row';
@@ -26,6 +26,8 @@ export function viewMy(): ViewResult {
     .join('');
   return {
     bar: `<h3>Мои задачи</h3><span class="pill">${esc(s.me.name.split(/\s+/)[0])}</span><span class="sp">${addButton()}</span>`,
-    body: body || '<div class="empty2">Задач нет.</div>',
+    body:
+      body ||
+      `<div class="empty2">${can.editTasks() ? 'На вас пока нет задач. Создайте первую кнопкой «+ Задача» или клавишей N.' : 'На вас пока нет задач.'}</div>`,
   };
 }

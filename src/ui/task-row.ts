@@ -14,8 +14,7 @@ export function taskRowHtml(t: Task, opts: { showNobody?: boolean } = {}): strin
   return `<div class="row" data-id="${esc(t.id)}">
     <button class="chk" data-id="${esc(t.id)}" data-on="${done ? 1 : 0}" aria-pressed="${done}" aria-label="${done ? 'Снять отметку' : 'Отметить сделанной'}"${can.moveTask(t) ? '' : ' disabled'}>✓</button>
     <span class="nm${done ? ' done' : ''}">${esc(t.title)}${t.tags.length ? `<span class="sub">${esc(t.tags[0])}</span>` : ''}</span>
-    ${statusPill(t)}
-    ${duePill(t) || '<span></span>'}
+    <span class="rmeta">${statusPill(t)}${duePill(t) || '<span></span>'}</span>
     <span>${who}</span>
   </div>`;
 }

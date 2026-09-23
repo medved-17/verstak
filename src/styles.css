@@ -188,3 +188,40 @@ dialog.modal.modal-wide{width:min(720px,calc(100vw - 32px))}
 .fitem[data-task]{cursor:pointer}
 .fitem[data-task]:hover b{color:var(--accent)}
 .fbar-sp{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+
+/* ---------- T-21: телефон, тема, связь ---------- */
+
+/* Статус и срок в строке: на компьютере — обычные ячейки сетки, на телефоне — вторая строка */
+.row .rmeta{display:contents}
+.col-empty{font-size:12px;color:var(--muted);font-style:italic;padding:6px 3px}
+
+/* Навигация для узких экранов: в макете боковая панель ниже 820px просто прячется */
+.mnav{display:none}
+@media (max-width:820px){
+  .mnav{display:flex;gap:4px;align-items:center;padding:8px 10px;border-bottom:1px solid var(--rule-2);background:var(--surface-2);overflow-x:auto;scrollbar-width:none;position:sticky;top:0;z-index:5}
+  .mnav::-webkit-scrollbar{display:none}
+  .mnav button{flex:none;font-family:inherit;font-size:13px;color:var(--ink-2);background:none;border:0;border-radius:7px;padding:6px 10px;cursor:pointer;white-space:nowrap}
+  .mnav button[aria-current="true"]{background:var(--surface);color:var(--ink);font-weight:600;box-shadow:0 1px 2px rgba(20,26,38,.06)}
+  .mnav .ws .av{width:24px;height:24px;font-size:11px}
+  .mnav .ws{padding:0 6px 0 0}
+  .mnav .sep{flex:none;width:1px;height:18px;background:var(--rule)}
+  .side{position:static;height:auto}
+  .kanban{grid-auto-flow:row;grid-auto-columns:auto}
+  .bar{padding:11px 12px}
+  .body{padding:12px}
+  .fbar-sp{margin-left:0}
+}
+@media (max-width:560px){
+  .row{grid-template-columns:22px minmax(0,1fr) auto;row-gap:6px}
+  .row .rmeta{display:flex;gap:6px;flex-wrap:wrap;grid-column:2/4;grid-row:2}
+  .row .rmeta:empty,.row .rmeta>span:empty{display:none}
+  .td-head{flex-direction:column;gap:2px}
+}
+
+/* Переключатель темы — из макета */
+.themebtn{position:fixed;right:18px;bottom:18px;z-index:9;background:var(--surface);border:1px solid var(--rule);color:var(--ink-2);border-radius:999px;padding:8px 14px;font-family:inherit;font-size:13px;cursor:pointer}
+@media (max-width:820px){.themebtn{right:12px;bottom:12px;padding:6px 12px;font-size:12px}}
+
+/* Нет связи */
+.offline{position:fixed;left:18px;bottom:18px;z-index:9;background:var(--warm-bg);color:var(--warm);border-radius:999px;padding:8px 14px;font-size:13px;max-width:calc(100vw - 160px)}
+@media (max-width:820px){.offline{left:12px;bottom:12px;font-size:12px;padding:6px 12px}}
