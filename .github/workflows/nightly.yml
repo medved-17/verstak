@@ -1,0 +1,51 @@
+# Ночной бэкап: выгрузка всей базы в JSON и коммит в приватный репозиторий verstak-backup.
+# История версий — это история коммитов того репозитория.
+# Запуск вручную: Actions → nightly → Run workflow.
+name: nightly
+
+on:
+  schedule:
+    - cron: '0 1 * * *' # 01:00 UTC = 04:00 по Москве
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # Приватный репозиторий с бэкапами; ключ развёртывания даёт запись только в него
+      - uses: actions/checkout@v7
+        with:
+          repository: medved-17/verstak-backup
+          ssh-key: ${{ secrets.BACKUP_DEPLOY_KEY }}
+          path: backup
+
+      - name: Выгрузка Firestore
+        run: node .github/scripts/backup.mjs backup/verstak.json
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      - name: Коммит бэкапа
+        working-directory: backup
+        run: |
+          git config user.name "verstak-backup"
+          git config user.email "verstak-backup@users.noreply.github.com"
+          git add verstak.json
+          if git diff --cached --quiet; then
+            echo "Изменений нет — коммит не нужен"
+          else
+            git commit -q -m "Бэкап $(date -u +%Y-%m-%d)"
+            git push -q
+          fi
