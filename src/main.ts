@@ -204,6 +204,12 @@ function renderShell(): void {
       openInviteForm();
       return;
     }
+    // Пустая клетка шкалы сроков — новая задача на этот день и этого человека
+    const slot = t.closest<HTMLElement>('.tl-c[data-due]');
+    if (slot && !t.closest('.tl-dot')) {
+      openTaskForm({ due: slot.dataset.due!, assignees: slot.dataset.uid ? [slot.dataset.uid] : [] });
+      return;
+    }
     const chk = t.closest<HTMLElement>('.chk[data-id]');
     if (chk) {
       toggleDone(chk.dataset.id!).catch((err) => toast(writeErrorText(err), 'bad'));
