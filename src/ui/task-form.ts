@@ -1,5 +1,6 @@
 // Окно создания и правки задачи: заголовок, описание, статус, исполнители, срок, приоритет, метки
 import {
+  can,
   createTask,
   DESCR_MAX,
   getAllTags,
@@ -27,6 +28,9 @@ export function openTaskForm(id?: string, defaults: Partial<TaskInput> = {}): vo
   const s = getSession()!;
   const task = id ? getTask(id) : undefined;
   if (id && !task) return;
+  if (!task && !can.editTasks()) return;
+  // Что можно менять: всё (участник и выше), только статус (комментатор, своя задача) или ничего
+  const mode: 'full' | 'status' | 'view' = !task || can.editTasks() ? 'full' : can.moveTask(task) ? 'status' : 'view';
   const v: TaskInput = task
     ? { title: task.title, descr: task.descr, status: task.status, assignees: [...task.assignees], due: task.due, priority: task.priority, tags: [...task.tags] }
     : { title: '', descr: '', status: s.workspace.statuses[0]?.key ?? '', assignees: [s.uid], due: null, priority: 2, tags: [], ...defaults };
@@ -37,6 +41,7 @@ export function openTaskForm(id?: string, defaults: Partial<TaskInput> = {}): vo
   const { el, close } = openModal(`
     <form method="dialog" class="tform" novalidate>
       <h3>${task ? 'Задача' : 'Новая задача'}</h3>
+      ${mode === 'status' ? '<p class="muted">Вы можете менять только статус этой задачи.</p>' : mode === 'view' ? '<p class="muted">Только просмотр.</p>' : ''}
       <label class="fld"><span class="k">Заголовок</span>
         <input class="inp" name="title" maxlength="${TITLE_MAX}" required autocomplete="off" value="${esc(v.title)}">
       </label>
@@ -70,8 +75,8 @@ export function openTaskForm(id?: string, defaults: Partial<TaskInput> = {}): vo
       </div>
       <p class="err" hidden></p>
       <div class="acts">
-        <button type="button" class="btn" data-act="cancel">Отмена</button>
-        <button type="submit" class="btn pri">${task ? 'Сохранить' : 'Создать'}</button>
+        <button type="button" class="btn" data-act="cancel">${mode === 'view' ? 'Закрыть' : 'Отмена'}</button>
+        ${mode === 'view' ? '' : `<button type="submit" class="btn pri">${task ? 'Сохранить' : 'Создать'}</button>`}
       </div>
     </form>`);
 
@@ -79,7 +84,15 @@ export function openTaskForm(id?: string, defaults: Partial<TaskInput> = {}): vo
   const err = form.querySelector<HTMLElement>('.err')!;
   const titleInput = form.querySelector<HTMLInputElement>('[name=title]')!;
   const newTag = form.querySelector<HTMLInputElement>('[name=newtag]')!;
-  titleInput.focus();
+  if (mode !== 'full') {
+    form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>('.inp, .chip').forEach((el) => {
+      if (!(mode === 'status' && el.getAttribute('name') === 'status')) el.disabled = true;
+    });
+    newTag.hidden = true;
+    form.querySelector<HTMLElement>(mode === 'status' ? '[name=status]' : '[data-act=cancel]')!.focus();
+  } else {
+    titleInput.focus();
+  }
 
   const addTagChip = (name: string) => {
     const g = name.trim();
@@ -96,7 +109,7 @@ export function openTaskForm(id?: string, defaults: Partial<TaskInput> = {}): vo
   form.addEventListener('click', (e) => {
     const t = e.target as HTMLElement;
     const chip = t.closest<HTMLButtonElement>('.chip');
-    if (chip) chip.setAttribute('aria-pressed', String(chip.getAttribute('aria-pressed') !== 'true'));
+    if (chip && !chip.disabled) chip.setAttribute('aria-pressed', String(chip.getAttribute('aria-pressed') !== 'true'));
     if (t.closest('[data-act=cancel]')) close();
   });
 
@@ -114,12 +127,14 @@ export function openTaskForm(id?: string, defaults: Partial<TaskInput> = {}): vo
     const fd = new FormData(form);
     const picked = (group: string) =>
       [...form.querySelectorAll<HTMLButtonElement>(`[data-group=${group}] .chip[aria-pressed=true]`)].map((b) => b.dataset.v!);
+    // Отключённые поля в FormData не попадают — для них берём прежние значения
+    const field = (name: string, prev: string) => (fd.has(name) ? String(fd.get(name)) : prev);
     const next: TaskInput = {
-      title: String(fd.get('title') ?? '').trim(),
-      descr: String(fd.get('descr') ?? ''),
-      status: String(fd.get('status')),
-      due: String(fd.get('due') ?? '') || null,
-      priority: Number(fd.get('priority')) as Priority,
+      title: field('title', v.title).trim(),
+      descr: field('descr', v.descr),
+      status: field('status', v.status),
+      due: field('due', v.due ?? '') || null,
+      priority: Number(field('priority', String(v.priority))) as Priority,
       assignees: picked('assignees'),
       tags: picked('tags'),
     };

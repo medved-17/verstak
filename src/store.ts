@@ -109,6 +109,25 @@ export function getSession(): Session | null {
   return session;
 }
 
+// ---------- Права в интерфейсе ----------
+// Настоящая проверка — в firestore.rules; здесь только решаем, какие кнопки показывать.
+
+const myRole = (): Role | undefined => session?.me.role;
+
+export const can = {
+  /** Создавать и править любые задачи. */
+  editTasks: () => ['owner', 'admin', 'member'].includes(myRole() ?? ''),
+  /** Менять статус и порядок задачи: участник и выше — любой, комментатор — своей. */
+  moveTask: (t: Task) =>
+    can.editTasks() || (myRole() === 'commenter' && !!session && t.assignees.includes(session.uid)),
+  /** Писать комментарии. */
+  comment: () => !!myRole() && myRole() !== 'viewer',
+  /** Приглашать людей. */
+  invite: () => myRole() === 'owner' || myRole() === 'admin',
+  /** Менять роль участника: не себе и не владельцу. */
+  changeRole: (m: Member) => can.invite() && !!session && m.uid !== session.uid && m.role !== 'owner',
+};
+
 // ---------- Счётчик чтений ----------
 // Считаем то, за что платим: документы, пришедшие с сервера. Снимки из локального
 // кэша бесплатны и не считаются. Итог виден в консоли и через verstak.reads().
@@ -311,6 +330,9 @@ export function startLive(): void {
           if (ch.type === 'removed') members.delete(ch.doc.id);
           else members.set(ch.doc.id, { uid: ch.doc.id, ...(ch.doc.data() as Omit<Member, 'uid'>) });
         });
+        // Роль могли сменить, пока человек в приложении — берём из подписки, без лишних чтений
+        const me = session && members.get(session.uid);
+        if (session && me) session.me = me;
         loaded.members = true;
         emit();
       },
@@ -469,8 +491,19 @@ export const INVITE_DAYS = 7;
 
 /** Роли, которые может выдать текущий человек: владелец и администратор — всё, кроме владельца. */
 export function invitableRoles(): Role[] {
-  const r = session?.me.role;
-  return r === 'owner' || r === 'admin' ? ['admin', 'member', 'commenter', 'viewer'] : [];
+  return can.invite() ? ['admin', 'member', 'commenter', 'viewer'] : [];
+}
+
+/** Сменить роль участника. Одна запись. */
+export function setRole(uid: string, role: Role): Promise<void> {
+  const s = session!;
+  if (demo) {
+    const m = members.get(uid);
+    if (m) members.set(uid, { ...m, role });
+    emit();
+    return Promise.resolve();
+  }
+  return writeBatch(db).update(doc(db, 'workspaces', s.workspace.id, 'members', uid), { role }).commit();
 }
 
 /** Создать приглашение на 7 дней. Одна запись. Возвращает токен и срок. */

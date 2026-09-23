@@ -1,3 +1,5 @@
+import { can } from '../store';
+
 // Мелкие помощники для сборки разметки строками
 
 /** Экранирование текста для вставки в HTML. */
@@ -11,7 +13,7 @@ export function pl(n: number, one: string, few: string, many: string): string {
   return n + ' ' + (m >= 11 && m <= 14 ? many : k === 1 ? one : k >= 2 && k <= 4 ? few : many);
 }
 
-/** Кнопка «+ Задача» из шапки макета; обработчик — общий, в main.ts. */
+/** Кнопка «+ Задача» из шапки макета; обработчик — общий, в main.ts. Только тем, кто может создавать. */
 export function addButton(): string {
-  return '<button class="btn pri" data-act="add">+ Задача</button>';
+  return can.editTasks() ? '<button class="btn pri" data-act="add">+ Задача</button>' : '';
 }

@@ -19,6 +19,7 @@ import {
   startLive,
   stopLive,
   toggleDone,
+  type Role,
 } from './store';
 import { avatarHtml } from './ui/avatar';
 import { esc, pl } from './ui/dom';
@@ -343,7 +344,10 @@ async function onSignedIn(user: User): Promise<void> {
 
 async function startDemoMode(): Promise<void> {
   const d = await import('./demo');
-  startDemo({ workspace: d.demoWorkspace, members: d.demoMembers, tasks: d.demoTasks, uid: d.DEMO_UID });
+  // ?demo=commenter — посмотреть интерфейс под другой ролью
+  const role = new URLSearchParams(location.search).get('demo') as Role | '';
+  const members = d.demoMembers.map((m) => (m.uid === d.DEMO_UID && role ? { ...m, role } : m));
+  startDemo({ workspace: d.demoWorkspace, members, tasks: d.demoTasks, uid: d.DEMO_UID });
   renderShell();
   render();
 }
